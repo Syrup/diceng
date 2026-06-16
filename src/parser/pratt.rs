@@ -94,21 +94,40 @@ impl Parser {
     fn parse_expression(&mut self, min_bp: u8) -> Expression {
         let mut lhs = self.parse_unary();
 
-        while let TokenKind::Op(op) = &self.current().kind {
-            let op = *op;
-
-            let (l_bp, r_bp) = Self::infix_binding_power(op);
-            if l_bp < min_bp {
-                break;
+        loop {
+            match &self.current().kind {
+                TokenKind::Op(op) => {
+                    let op = *op;
+                    let (l_bp, r_bp) = Self::infix_binding_power(op);
+                    if l_bp < min_bp {
+                        break;
+                    }
+                    self.advance();
+                    let rhs = self.parse_expression(r_bp);
+                    lhs = Expression::BinaryOp {
+                        op,
+                        left: Box::new(lhs),
+                        right: Box::new(rhs),
+                    };
+                }
+                TokenKind::LParen => {
+                    // Implicit multiplication: lhs * (expr)
+                    // e.g., 2(3d6) = 2 * (3d6), 3d6(2+4) = 3d6 * (2+4)
+                    let (l_bp, _) = Self::infix_binding_power(BinaryOp::Mul);
+                    if l_bp < min_bp {
+                        break;
+                    }
+                    self.advance(); // consume '('
+                    let rhs = self.parse_expression(0);
+                    let _ = self.expect(TokenKind::RParen);
+                    lhs = Expression::BinaryOp {
+                        op: BinaryOp::Mul,
+                        left: Box::new(lhs),
+                        right: Box::new(rhs),
+                    };
+                }
+                _ => break,
             }
-
-            self.advance();
-            let rhs = self.parse_expression(r_bp);
-            lhs = Expression::BinaryOp {
-                op,
-                left: Box::new(lhs),
-                right: Box::new(rhs),
-            };
         }
 
         lhs

@@ -212,7 +212,7 @@ impl RollResult {
                     kept: true,
                     chain: None,
                     operator: None,
-                    kind: None,
+                    kind: Some(DieEntryKind::Literal),
                 }]
             }
             RollResult::Die { value, .. } => {
@@ -229,20 +229,24 @@ impl RollResult {
             } => {
                 // Recursively extract dice entries from both operands
                 let mut entries = left.to_verbose_entries();
-                // Tag right operand entries with the operator
+
+                // Add separator
                 let op_str = match op {
                     BinaryOp::Add => "+",
                     BinaryOp::Sub => "-",
                     BinaryOp::Mul => "*",
                     BinaryOp::Div => "/",
                 };
-                let mut right_entries = right.to_verbose_entries();
-                for entry in &mut right_entries {
-                    if entry.operator.is_none() {
-                        entry.operator = Some(op_str.to_string());
-                    }
-                }
-                entries.extend(right_entries);
+                entries.push(DieEntry {
+                    value: 0,
+                    kept: false, // not a die, exclude from Kept/Drop summary
+                    chain: None,
+                    operator: Some(op_str.to_string()),
+                    kind: Some(DieEntryKind::Separator),
+                });
+
+                // Add right entries without operator prefix
+                entries.extend(right.to_verbose_entries());
                 entries
             }
             RollResult::UnaryMinus { inner, .. } => inner.to_verbose_entries(),

@@ -20,6 +20,10 @@ pub enum DieEntryKind {
     Emphasis,
     /// Counted: threshold match
     Counted,
+    /// Separator: arithmetic operator between groups
+    Separator,
+    /// Literal: plain number (not a dice roll)
+    Literal,
 }
 
 /// Entry for a single die in verbose display
@@ -64,19 +68,27 @@ pub fn render_verbose(expression: &str, result: i32, dice: &[DieEntry]) -> Strin
 
     // Summary
     if is_counted {
-        // For counted results, show count instead of sum
-        let count = dice.iter().filter(|d| d.kept).count();
-        let total = dice.len();
+        // For counted results, show the actual count from the expression
+        let total = dice
+            .iter()
+            .filter(|d| d.kind != Some(DieEntryKind::Separator))
+            .count();
         out.push_str(&format!(
             "{} {} (from {} dice)",
             "Count:".green().bold(),
-            count.to_string().bold(),
+            result.to_string().bold(),
             total
         ));
         out.push('\n');
     } else {
-        let kept: Vec<_> = dice.iter().filter(|d| d.kept).collect();
-        let dropped: Vec<_> = dice.iter().filter(|d| !d.kept).collect();
+        let kept: Vec<_> = dice
+            .iter()
+            .filter(|d| d.kept && d.kind != Some(DieEntryKind::Separator))
+            .collect();
+        let dropped: Vec<_> = dice
+            .iter()
+            .filter(|d| !d.kept && d.kind != Some(DieEntryKind::Separator))
+            .collect();
 
         if !kept.is_empty() {
             let vals: Vec<String> = kept.iter().map(|d| d.value.to_string()).collect();
@@ -106,9 +118,15 @@ pub fn render_verbose(expression: &str, result: i32, dice: &[DieEntry]) -> Strin
 }
 
 fn format_die_entry(die: &DieEntry) -> String {
-    // If this entry has an operator (from arithmetic literal), show it specially
-    if let Some(ref op) = die.operator {
-        return format!("[{}{}]", op, die.value).cyan().to_string();
+    // Separator: show operator with spaces
+    if die.kind == Some(DieEntryKind::Separator) {
+        let op = die.operator.as_deref().unwrap_or("");
+        return format!(" {} ", op).cyan().to_string();
+    }
+
+    // Literal: show plain number without brackets or checkmark
+    if die.kind == Some(DieEntryKind::Literal) {
+        return format!("{}", die.value).cyan().to_string();
     }
 
     if let Some(ref chain) = die.chain {

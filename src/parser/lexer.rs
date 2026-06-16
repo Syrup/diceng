@@ -183,6 +183,8 @@ impl Lexer {
             let token = match ch {
                 '(' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::LParen,
                         text: "(".into(),
@@ -192,6 +194,8 @@ impl Lexer {
                 }
                 ')' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::RParen,
                         text: ")".into(),
@@ -201,6 +205,8 @@ impl Lexer {
                 }
                 '[' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::LBrack,
                         text: "[".into(),
@@ -210,6 +216,8 @@ impl Lexer {
                 }
                 ']' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::RBrack,
                         text: "]".into(),
@@ -219,6 +227,8 @@ impl Lexer {
                 }
                 '{' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::LBrace,
                         text: "{".into(),
@@ -228,6 +238,8 @@ impl Lexer {
                 }
                 '}' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::RBrace,
                         text: "}".into(),
@@ -237,6 +249,8 @@ impl Lexer {
                 }
                 ',' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::Comma,
                         text: ",".into(),
@@ -246,6 +260,8 @@ impl Lexer {
                 }
                 '+' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::Op(BinaryOp::Add),
                         text: "+".into(),
@@ -255,6 +271,8 @@ impl Lexer {
                 }
                 '-' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::Op(BinaryOp::Sub),
                         text: "-".into(),
@@ -264,6 +282,8 @@ impl Lexer {
                 }
                 '*' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::Op(BinaryOp::Mul),
                         text: "*".into(),
@@ -273,6 +293,8 @@ impl Lexer {
                 }
                 '/' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::Op(BinaryOp::Div),
                         text: "/".into(),
