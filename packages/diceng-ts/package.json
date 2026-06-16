@@ -1,0 +1,29 @@
+{
+  "name": "diceng",
+  "version": "1.0.0",
+  "description": "Fast dice expression parser, roller, and probability analyzer — TypeScript wrapper for diceng native library",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "scripts",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "postinstall": "bun run scripts/postinstall.ts",
+    "test": "bun test"
+  },
+  "keywords": ["dice", "roller", "rpg", "dnd", "probability", "ffi"],
+  "license": "MIT",
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}

@@ -1,8 +1,9 @@
 use colored::*;
+use serde::{Deserialize, Serialize};
 use terminal_size::{terminal_size, Width};
 
 /// Kind of die entry for verbose display
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DieEntryKind {
     /// Explode: `!` - extra roll added to sum
     Explode,
@@ -29,7 +30,7 @@ pub enum DieEntryKind {
 }
 
 /// Entry for a single die in verbose display
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DieEntry {
     pub value: i32,
     pub kept: bool,

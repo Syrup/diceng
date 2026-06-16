@@ -101,6 +101,58 @@ pub extern "C" fn diceng_roll(expr_json: *const c_char, seed: c_longlong) -> *mu
     json_to_ptr(&output)
 }
 
+/// Convenience: parse and roll a dice expression in one call.
+///
+/// `input` is a dice expression string like "3d6+4" or "4d6kh3".
+/// `seed` is the deterministic seed. Pass -1 for random rolls.
+///
+/// Returns a JSON object:
+/// - `{"value": N, "dice": [{"value": N, "kept": true, "chain": [...], "kind": "...", "operator": "..."}, ...]}`
+/// - `{"error": "..."}` on failure
+///
+/// The returned pointer must be freed with `diceng_free`.
+#[no_mangle]
+pub extern "C" fn diceng_roll_dice(input: *const c_char, seed: c_longlong) -> *mut c_char {
+    let Some(input_str) = (unsafe { ptr_to_str(input) }) else {
+        let err = serde_json::json!({"error": "null or invalid UTF-8 input"});
+        return json_to_ptr(&err);
+    };
+
+    let parse_result = parse(input_str);
+    if !parse_result.success() {
+        let err = serde_json::json!({"error": format!("parse error: {}", parse_result.errors()[0].message)});
+        return json_to_ptr(&err);
+    }
+
+    let expr = parse_result.expression().unwrap();
+    let result = if seed < 0 {
+        roll(expr)
+    } else {
+        roll_seeded(expr, seed as u32)
+    };
+
+    let dice: Vec<serde_json::Value> = result
+        .to_verbose_entries()
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "value": entry.value,
+                "kept": entry.kept,
+                "chain": entry.chain,
+                "kind": entry.kind,
+                "operator": entry.operator,
+            })
+        })
+        .collect();
+
+    let output = serde_json::json!({
+        "value": result.value(),
+        "dice": dice,
+    });
+
+    json_to_ptr(&output)
+}
+
 /// Compute probability distribution for a dice expression.
 ///
 /// `expr_json` must be a JSON string produced by `diceng_parse` (the `expression` field).
