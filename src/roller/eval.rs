@@ -1,4 +1,4 @@
-use crate::display::DieEntry;
+use crate::display::{DieEntry, DieEntryKind};
 use crate::parser::ast::*;
 use crate::roller::rng::*;
 use crate::types::*;
@@ -130,54 +130,54 @@ impl RollResult {
     /// and optional chain information for explode/reroll sequences.
     pub fn to_verbose_entries(&self) -> Vec<DieEntry> {
         match self {
-            RollResult::DicePool { results, .. } => {
-                results
-                    .iter()
-                    .map(|r| {
-                        match r {
-                            RollResult::Functor {
-                                original,
-                                extra_rolls,
-                                ..
-                            } => {
-                                // Build chain: [original] → [extra1] → [extra2]
-                                let mut chain = vec![original.value()];
-                                for extra in extra_rolls {
-                                    chain.push(extra.value());
-                                }
-                                DieEntry {
-                                    value: r.value(),
-                                    kept: true,
-                                    chain: Some(chain),
-                                    operator: None,
-                                }
-                            }
-                            _ => DieEntry {
-                                value: r.value(),
-                                kept: true,
-                                chain: None,
-                                operator: None,
-                            },
+            RollResult::DicePool { results, .. } => results
+                .iter()
+                .map(|r| match r {
+                    RollResult::Functor {
+                        original,
+                        extra_rolls,
+                        kind,
+                        value,
+                        ..
+                    } => {
+                        let (chain, entry_kind) = build_chain(original, extra_rolls, kind, *value);
+                        DieEntry {
+                            value: *value,
+                            kept: true,
+                            chain: Some(chain),
+                            operator: None,
+                            kind: Some(entry_kind),
                         }
-                    })
-                    .collect()
-            }
+                    }
+                    _ => DieEntry {
+                        value: r.value(),
+                        kept: true,
+                        chain: None,
+                        operator: None,
+                        kind: None,
+                    },
+                })
+                .collect(),
             RollResult::Filtered { kept, dropped, .. } => {
                 let mut entries = Vec::new();
                 for k in kept {
+                    let (chain, kind) = extract_chain_and_kind(k);
                     entries.push(DieEntry {
                         value: k.value(),
                         kept: true,
-                        chain: extract_chain(k),
+                        chain,
                         operator: None,
+                        kind,
                     });
                 }
                 for d in dropped {
+                    let (chain, kind) = extract_chain_and_kind(d);
                     entries.push(DieEntry {
                         value: d.value(),
                         kept: false,
-                        chain: extract_chain(d),
+                        chain,
                         operator: None,
+                        kind,
                     });
                 }
                 // Sort: kept first (descending value), then dropped (descending value)
@@ -193,17 +193,17 @@ impl RollResult {
             RollResult::Functor {
                 original,
                 extra_rolls,
+                kind,
+                value,
                 ..
             } => {
-                let mut chain = vec![original.value()];
-                for extra in extra_rolls {
-                    chain.push(extra.value());
-                }
+                let (chain, entry_kind) = build_chain(original, extra_rolls, kind, *value);
                 vec![DieEntry {
-                    value: self.value(),
+                    value: *value,
                     kept: true,
                     chain: Some(chain),
                     operator: None,
+                    kind: Some(entry_kind),
                 }]
             }
             RollResult::Literal { value } => {
@@ -212,6 +212,7 @@ impl RollResult {
                     kept: true,
                     chain: None,
                     operator: None,
+                    kind: None,
                 }]
             }
             RollResult::Die { value, .. } => {
@@ -220,6 +221,7 @@ impl RollResult {
                     kept: true,
                     chain: None,
                     operator: None,
+                    kind: None,
                 }]
             }
             RollResult::BinaryOp {
@@ -251,26 +253,80 @@ impl RollResult {
                 }
                 entries
             }
-            RollResult::Counted { pool, .. } => pool.to_verbose_entries(),
+            RollResult::Counted { pool, .. } => {
+                // Mark all entries as counted
+                let mut entries = pool.to_verbose_entries();
+                for entry in &mut entries {
+                    entry.kind = Some(DieEntryKind::Counted);
+                }
+                entries
+            }
         }
     }
 }
 
-/// Extract chain from a functor result
-fn extract_chain(result: &RollResult) -> Option<Vec<i32>> {
-    match result {
-        RollResult::Functor {
-            original,
-            extra_rolls,
-            ..
-        } => {
+/// Build chain from a functor result, with correct ordering based on kind.
+///
+/// For rerolls: chain is [discarded1, discarded2, ..., final]
+/// For explode/compound: chain is [original, extra1, extra2, ...]
+/// For caps: chain is [original, capped]
+fn build_chain(
+    original: &RollResult,
+    extra_rolls: &[RollResult],
+    kind: &FunctorKind,
+    final_value: i32,
+) -> (Vec<i32>, DieEntryKind) {
+    let entry_kind = match kind {
+        FunctorKind::Explode => DieEntryKind::Explode,
+        FunctorKind::Reroll => DieEntryKind::Reroll,
+        FunctorKind::Compound => DieEntryKind::Compound,
+        FunctorKind::Emphasis => DieEntryKind::Emphasis,
+        FunctorKind::MinCap => DieEntryKind::MinCap,
+        FunctorKind::MaxCap => DieEntryKind::MaxCap,
+    };
+
+    match kind {
+        FunctorKind::Reroll => {
+            // For rerolls: show discarded rolls first, then final kept roll
+            let mut chain = Vec::new();
+            for extra in extra_rolls {
+                chain.push(extra.value());
+            }
+            chain.push(final_value);
+            (chain, entry_kind)
+        }
+        FunctorKind::MinCap | FunctorKind::MaxCap => {
+            // For caps: show [original, capped_value]
+            let chain = vec![original.value(), final_value];
+            (chain, entry_kind)
+        }
+        _ => {
+            // For explode/compound/emphasis: [original, extra1, extra2, ...]
             let mut chain = vec![original.value()];
             for extra in extra_rolls {
                 chain.push(extra.value());
             }
-            Some(chain)
+            (chain, entry_kind)
         }
-        _ => None,
+    }
+}
+
+/// Extract chain and kind from a functor result.
+///
+/// Returns (chain, kind) or (None, None) for non-functor results.
+fn extract_chain_and_kind(result: &RollResult) -> (Option<Vec<i32>>, Option<DieEntryKind>) {
+    match result {
+        RollResult::Functor {
+            original,
+            extra_rolls,
+            kind,
+            value,
+            ..
+        } => {
+            let (chain, entry_kind) = build_chain(original, extra_rolls, kind, *value);
+            (Some(chain), Some(entry_kind))
+        }
+        _ => (None, None),
     }
 }
 
