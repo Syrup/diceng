@@ -25,13 +25,24 @@ export function parse(input: string): ParseResult {
 export function roll(expression: Expression, options?: RollOptions): RollResult {
   const seed = options?.seed ?? -1;
   const exprJson = JSON.stringify(expression);
-  const raw = ffi_roll(exprJson, seed) as { value: number } | { error: string };
+  const raw = ffi_roll(exprJson, seed) as
+    | { value: number; dice: { value: number; kept: boolean; chain: number[] | null; kind: string | null; operator: string | null }[] }
+    | { error: string };
 
   if ("error" in raw) {
     throw new RollError(raw.error);
   }
 
-  return { value: raw.value, dice: [] };
+  return {
+    value: raw.value,
+    dice: raw.dice.map((d) => ({
+      value: d.value,
+      kept: d.kept,
+      chain: d.chain,
+      kind: d.kind,
+      operator: d.operator,
+    })),
+  };
 }
 
 export function rollDice(input: string, options?: RollOptions): RollResult {

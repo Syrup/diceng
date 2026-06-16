@@ -47,6 +47,17 @@ describe("diceng", () => {
       const r2 = roll(parsed.expression, { seed: 42 });
       expect(r1.value).toBe(r2.value);
     });
+
+    test("returns verbose dice data", () => {
+      const parsed = parse("4d6kh3");
+      expect(parsed.success).toBe(true);
+      if (!parsed.success) return;
+
+      const result = roll(parsed.expression, { seed: 42 });
+      expect(result.dice.length).toBeGreaterThan(0);
+      expect(result.dice[0]).toHaveProperty("value");
+      expect(result.dice[0]).toHaveProperty("kept");
+    });
   });
 
   describe("rollDice", () => {

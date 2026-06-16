@@ -97,7 +97,24 @@ pub extern "C" fn diceng_roll(expr_json: *const c_char, seed: c_longlong) -> *mu
         roll_seeded(&expr, seed as u32)
     };
 
-    let output = serde_json::json!({"value": result.value()});
+    let dice: Vec<serde_json::Value> = result
+        .to_verbose_entries()
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "value": entry.value,
+                "kept": entry.kept,
+                "chain": entry.chain,
+                "kind": entry.kind,
+                "operator": entry.operator,
+            })
+        })
+        .collect();
+
+    let output = serde_json::json!({
+        "value": result.value(),
+        "dice": dice,
+    });
     json_to_ptr(&output)
 }
 
