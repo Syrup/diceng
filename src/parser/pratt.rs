@@ -170,6 +170,10 @@ impl Parser {
                 self.advance(); // consume '['
                 self.parse_bracket_set()
             }
+            TokenKind::LBrace => {
+                self.advance(); // consume '{'
+                self.parse_dice_pool()
+            }
             _ => {
                 self.errors.push(ParseError {
                     message: format!("Unexpected token '{}'", self.current().kind),
@@ -661,6 +665,77 @@ impl Parser {
         let reducer = self.parse_reducer();
 
         Expression::DiceSet { exprs, reducer }
+    }
+
+    fn parse_dice_pool(&mut self) -> Expression {
+        let mut exprs = Vec::new();
+
+        loop {
+            if self.current().kind == TokenKind::RBrace {
+                break;
+            }
+            let expr = self.parse_expression(0);
+            exprs.push(expr);
+            if self.current().kind == TokenKind::Comma {
+                self.advance();
+            }
+        }
+
+        let _ = self.expect(TokenKind::RBrace);
+
+        // Parse pool modifier (kh, kl, dh, dl, cs>N)
+        let pool_modifier = self.parse_pool_modifier();
+
+        Expression::DicePool {
+            exprs,
+            pool_modifier,
+        }
+    }
+
+    fn parse_pool_modifier(&mut self) -> PoolModifier {
+        match &self.current().kind.clone() {
+            TokenKind::Shorthand(ModifierShorthand::KeepHigh) => {
+                self.advance();
+                let n = self.parse_optional_number(1) as u32;
+                PoolModifier::KeepHighest(n)
+            }
+            TokenKind::Shorthand(ModifierShorthand::KeepLow) => {
+                self.advance();
+                let n = self.parse_optional_number(1) as u32;
+                PoolModifier::KeepLowest(n)
+            }
+            TokenKind::Shorthand(ModifierShorthand::DropHigh) => {
+                self.advance();
+                let n = self.parse_optional_number(1) as u32;
+                PoolModifier::DropHighest(n)
+            }
+            TokenKind::Shorthand(ModifierShorthand::DropLow) => {
+                self.advance();
+                let n = self.parse_optional_number(1) as u32;
+                PoolModifier::DropLowest(n)
+            }
+            TokenKind::Shorthand(ModifierShorthand::CountSuccess) => {
+                self.advance();
+                let threshold = self.parse_target_threshold();
+                PoolModifier::CountSuccess(threshold)
+            }
+            TokenKind::Shorthand(ModifierShorthand::Target) => {
+                self.advance();
+                let threshold = self.parse_target_threshold();
+                PoolModifier::CountSuccess(threshold)
+            }
+            _ => PoolModifier::Sum,
+        }
+    }
+
+    fn parse_optional_number(&mut self, default: i32) -> i32 {
+        match self.current().kind {
+            TokenKind::Number(n) => {
+                self.advance();
+                n
+            }
+            _ => default,
+        }
     }
 
     fn parse_reducer(&mut self) -> Reducer {
@@ -1193,6 +1268,136 @@ mod tests {
                 assert_eq!(*reducer, Reducer::Min);
             }
             _ => panic!("Expected DiceSet"),
+        }
+    }
+
+    // ── Dice Pool Tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_dice_pool_keep_highest() {
+        let result = Parser::parse("{4d6, 3d8, 2d10}kh");
+        assert!(result.success(), "{{4d6, 3d8, 2d10}}kh should parse");
+        match result.expression().unwrap() {
+            Expression::DicePool {
+                exprs,
+                pool_modifier,
+            } => {
+                assert_eq!(exprs.len(), 3);
+                assert_eq!(*pool_modifier, PoolModifier::KeepHighest(1));
+            }
+            _ => panic!("Expected DicePool"),
+        }
+    }
+
+    #[test]
+    fn test_parse_dice_pool_keep_highest_n() {
+        let result = Parser::parse("{4d6, 3d8, 2d10}kh2");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::DicePool { pool_modifier, .. } => {
+                assert_eq!(*pool_modifier, PoolModifier::KeepHighest(2));
+            }
+            _ => panic!("Expected DicePool"),
+        }
+    }
+
+    #[test]
+    fn test_parse_dice_pool_keep_lowest() {
+        let result = Parser::parse("{4d6, 3d8}kl");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::DicePool { pool_modifier, .. } => {
+                assert_eq!(*pool_modifier, PoolModifier::KeepLowest(1));
+            }
+            _ => panic!("Expected DicePool"),
+        }
+    }
+
+    #[test]
+    fn test_parse_dice_pool_drop_highest() {
+        let result = Parser::parse("{4d6, 3d8, 2d10}dh1");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::DicePool { pool_modifier, .. } => {
+                assert_eq!(*pool_modifier, PoolModifier::DropHighest(1));
+            }
+            _ => panic!("Expected DicePool"),
+        }
+    }
+
+    #[test]
+    fn test_parse_dice_pool_drop_lowest() {
+        let result = Parser::parse("{4d6, 3d8, 2d10}dl1");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::DicePool { pool_modifier, .. } => {
+                assert_eq!(*pool_modifier, PoolModifier::DropLowest(1));
+            }
+            _ => panic!("Expected DicePool"),
+        }
+    }
+
+    #[test]
+    fn test_parse_dice_pool_count_success() {
+        let result = Parser::parse("{6d6, 5d8, 4d10, 3d12}cs>15");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::DicePool { pool_modifier, .. } => match pool_modifier {
+                PoolModifier::CountSuccess(threshold) => {
+                    assert_eq!(threshold.thresholds.len(), 1);
+                    assert_eq!(threshold.thresholds[0].op, CountOp::Gt);
+                    assert_eq!(threshold.thresholds[0].value, 15);
+                }
+                _ => panic!("Expected CountSuccess"),
+            },
+            _ => panic!("Expected DicePool"),
+        }
+    }
+
+    #[test]
+    fn test_parse_dice_pool_no_modifier() {
+        let result = Parser::parse("{4d6, 3d8}");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::DicePool { pool_modifier, .. } => {
+                assert_eq!(*pool_modifier, PoolModifier::Sum);
+            }
+            _ => panic!("Expected DicePool"),
+        }
+    }
+
+    #[test]
+    fn test_parse_dice_pool_with_literal() {
+        let result = Parser::parse("{1d20, 10}kh");
+        assert!(result.success(), "{{1d20, 10}}kh should parse");
+        match result.expression().unwrap() {
+            Expression::DicePool { exprs, .. } => {
+                assert_eq!(exprs.len(), 2);
+            }
+            _ => panic!("Expected DicePool"),
+        }
+    }
+
+    #[test]
+    fn test_parse_dice_pool_nested_modifiers() {
+        // D&D character creation: {4d6kh3, 4d6kh3, ...}
+        let result = Parser::parse("{4d6kh3, 4d6kh3, 4d6kh3}");
+        assert!(result.success(), "Nested pool should parse");
+        match result.expression().unwrap() {
+            Expression::DicePool { exprs, .. } => {
+                assert_eq!(exprs.len(), 3);
+                // Each sub-expression should be Dice with Keep filter
+                for expr in exprs {
+                    match expr {
+                        Expression::Dice(d) => {
+                            assert_eq!(d.filters.len(), 1);
+                            assert_eq!(d.filters[0].filter_type, FilterType::Keep);
+                        }
+                        _ => panic!("Expected Dice inside pool"),
+                    }
+                }
+            }
+            _ => panic!("Expected DicePool"),
         }
     }
 

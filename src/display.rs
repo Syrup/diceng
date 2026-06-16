@@ -24,6 +24,8 @@ pub enum DieEntryKind {
     Separator,
     /// Literal: plain number (not a dice roll)
     Literal,
+    /// Pool group: a sub-expression in a Foundry VTT dice pool
+    PoolGroup,
 }
 
 /// Entry for a single die in verbose display

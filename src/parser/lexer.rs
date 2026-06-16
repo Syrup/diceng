@@ -494,10 +494,24 @@ impl Lexer {
                             tok
                         }
                     } else {
-                        let tok = self.lex_dice(start)?;
-                        self.prev_was_dice = matches!(&tok.kind, TokenKind::Dice(_));
-                        self.prev_was_filter_number = false;
-                        tok
+                        // Check if 'd' followed by a letter (not digit/%/F/{)
+                        // If so, treat as identifier (e.g., "dh", "dl", "drop")
+                        let next_char = self.peek();
+                        if matches!(next_char, Some(c) if c.is_ascii_alphabetic() && c != 'F' && c != 'f')
+                        {
+                            let tok = self.lex_ident_or_keyword(start)?;
+                            self.prev_was_dice = false;
+                            self.prev_was_filter_number = false;
+                            let is_shorthand = matches!(&tok.kind, TokenKind::Shorthand(_));
+                            self.prev_was_filter_number = is_shorthand;
+                            self.prev_was_shorthand = is_shorthand;
+                            tok
+                        } else {
+                            let tok = self.lex_dice(start)?;
+                            self.prev_was_dice = matches!(&tok.kind, TokenKind::Dice(_));
+                            self.prev_was_filter_number = false;
+                            tok
+                        }
                     }
                 }
                 'a'..='z' | 'A'..='Z' | '_' => {
@@ -1494,11 +1508,10 @@ mod tests {
     }
 
     #[test]
-    fn test_lex_error_d_followed_by_letter() {
-        let result = Lexer::new("dabc").tokenize();
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.message.contains("Expected number"));
+    fn test_lex_d_followed_by_letter_is_identifier() {
+        // "dabc" is a valid identifier (not dice notation)
+        let tokens = Lexer::new("dabc").tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Ident("dabc".into()));
     }
 
     #[test]

@@ -13,6 +13,10 @@ pub fn compute_exact(expr: &Expression) -> Option<ProbabilitiesResult> {
         }
         Expression::Dice(dice_expr) => compute_dice_exact(dice_expr),
         Expression::DiceSet { exprs, reducer } => compute_dice_set_exact(exprs, *reducer),
+        Expression::DicePool {
+            exprs,
+            pool_modifier,
+        } => compute_dice_pool_exact(exprs, pool_modifier),
         Expression::BinaryOp { op, left, right } => {
             let left_dist = compute_exact(left)?;
             let right_dist = compute_exact(right)?;
@@ -159,6 +163,214 @@ fn compute_dice_set_exact(exprs: &[Expression], reducer: Reducer) -> Option<Prob
             None
         }
     }
+}
+
+fn compute_dice_pool_exact(
+    exprs: &[Expression],
+    modifier: &PoolModifier,
+) -> Option<ProbabilitiesResult> {
+    if exprs.is_empty() {
+        let mut result = ProbabilitiesResult::new();
+        result.add(0);
+        return Some(result);
+    }
+
+    // Compute distribution for each group
+    let dists: Vec<ProbabilitiesResult> = exprs
+        .iter()
+        .map(compute_exact)
+        .collect::<Option<Vec<_>>>()?;
+
+    // For pools with many groups, fall back to Monte Carlo
+    // (joint distribution space grows exponentially)
+    if dists.len() > 6 {
+        return None;
+    }
+
+    match modifier {
+        PoolModifier::Sum => {
+            // Same as DiceSet Sum: convolve all distributions
+            let mut result = dists[0].clone();
+            for dist in &dists[1..] {
+                result = convolve(&result, dist)?;
+            }
+            Some(result)
+        }
+        PoolModifier::KeepHighest(n) => Some(compute_pool_keep_exact(&dists, *n as usize, true)),
+        PoolModifier::KeepLowest(n) => Some(compute_pool_keep_exact(&dists, *n as usize, false)),
+        PoolModifier::DropHighest(n) => {
+            let keep_n = dists.len().saturating_sub(*n as usize);
+            Some(compute_pool_keep_exact(&dists, keep_n, false))
+        }
+        PoolModifier::DropLowest(n) => {
+            let keep_n = dists.len().saturating_sub(*n as usize);
+            Some(compute_pool_keep_exact(&dists, keep_n, true))
+        }
+        PoolModifier::CountSuccess(threshold) => Some(compute_pool_count_exact(&dists, threshold)),
+    }
+}
+
+/// Compute exact distribution for keep N highest/lowest from a pool of heterogeneous distributions.
+///
+/// Enumerates the joint distribution space by recursively iterating over all
+/// possible outcomes for each group, then selecting the N best groups.
+fn compute_pool_keep_exact(
+    dists: &[ProbabilitiesResult],
+    keep_n: usize,
+    keep_highest: bool,
+) -> ProbabilitiesResult {
+    let mut result = ProbabilitiesResult::new();
+
+    // Build list of (value, probability) pairs for each group
+    let group_outcomes: Vec<Vec<(i64, f64)>> = dists
+        .iter()
+        .map(|d| {
+            d.distribution
+                .iter()
+                .map(|(&v, &c)| (v, c as f64 / d.total as f64))
+                .collect()
+        })
+        .collect();
+
+    // Recursive enumeration of joint outcomes
+    fn enumerate_joint(
+        group_outcomes: &[Vec<(i64, f64)>],
+        depth: usize,
+        current_values: &mut Vec<i64>,
+        current_prob: f64,
+        keep_n: usize,
+        keep_highest: bool,
+        result: &mut ProbabilitiesResult,
+    ) {
+        if depth == group_outcomes.len() {
+            // We have a complete joint outcome
+            let mut indexed: Vec<(usize, i64)> = current_values
+                .iter()
+                .enumerate()
+                .map(|(i, &v)| (i, v))
+                .collect();
+
+            if keep_highest {
+                indexed.sort_by_key(|b| std::cmp::Reverse(b.1)); // descending
+            } else {
+                indexed.sort_by_key(|a| a.1); // ascending
+            }
+
+            let sum: i64 = indexed[..keep_n.min(indexed.len())]
+                .iter()
+                .map(|&(_, v)| v)
+                .sum();
+
+            // Use a large scaling factor to avoid floating point issues
+            let count = (current_prob * 1_000_000.0).round() as u64;
+            if count > 0 {
+                result.add_quantity(sum, count);
+            }
+            return;
+        }
+
+        for &(value, prob) in &group_outcomes[depth] {
+            current_values.push(value);
+            enumerate_joint(
+                group_outcomes,
+                depth + 1,
+                current_values,
+                current_prob * prob,
+                keep_n,
+                keep_highest,
+                result,
+            );
+            current_values.pop();
+        }
+    }
+
+    let mut current_values = Vec::new();
+    enumerate_joint(
+        &group_outcomes,
+        0,
+        &mut current_values,
+        1.0,
+        keep_n,
+        keep_highest,
+        &mut result,
+    );
+
+    result
+}
+
+/// Compute exact distribution for counting groups that meet a threshold.
+fn compute_pool_count_exact(
+    dists: &[ProbabilitiesResult],
+    threshold: &MultiCountThreshold,
+) -> ProbabilitiesResult {
+    let mut result = ProbabilitiesResult::new();
+
+    let group_outcomes: Vec<Vec<(i64, f64)>> = dists
+        .iter()
+        .map(|d| {
+            d.distribution
+                .iter()
+                .map(|(&v, &c)| (v, c as f64 / d.total as f64))
+                .collect()
+        })
+        .collect();
+
+    fn enumerate_joint(
+        group_outcomes: &[Vec<(i64, f64)>],
+        depth: usize,
+        current_values: &mut Vec<i64>,
+        current_prob: f64,
+        threshold: &MultiCountThreshold,
+        result: &mut ProbabilitiesResult,
+    ) {
+        if depth == group_outcomes.len() {
+            let count = current_values
+                .iter()
+                .filter(|&&v| {
+                    let val = v as u32;
+                    threshold.thresholds.iter().any(|t| match t.op {
+                        CountOp::Eq => val == t.value,
+                        CountOp::Ne => val != t.value,
+                        CountOp::Lt => val < t.value,
+                        CountOp::Le => val <= t.value,
+                        CountOp::Gt => val > t.value,
+                        CountOp::Ge => val >= t.value,
+                    })
+                })
+                .count();
+
+            let scaled = (current_prob * 1_000_000.0).round() as u64;
+            if scaled > 0 {
+                result.add_quantity(count as i64, scaled);
+            }
+            return;
+        }
+
+        for &(value, prob) in &group_outcomes[depth] {
+            current_values.push(value);
+            enumerate_joint(
+                group_outcomes,
+                depth + 1,
+                current_values,
+                current_prob * prob,
+                threshold,
+                result,
+            );
+            current_values.pop();
+        }
+    }
+
+    let mut current_values = Vec::new();
+    enumerate_joint(
+        &group_outcomes,
+        0,
+        &mut current_values,
+        1.0,
+        threshold,
+        &mut result,
+    );
+
+    result
 }
 
 fn compute_min_max_exact(dists: &[ProbabilitiesResult], is_min: bool) -> ProbabilitiesResult {
@@ -843,5 +1055,72 @@ mod tests {
         for i in -6..=-1 {
             assert!((dist.probability(i) - 1.0 / 6.0).abs() < 1e-10);
         }
+    }
+
+    // ── Dice Pool Tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_exact_pool_sum() {
+        let expr = Parser::parse("{d6, d6}").expression().unwrap().clone();
+        let dist = compute_exact(&expr).unwrap();
+        let stats = dist.stats();
+
+        // {d6, d6} sum = same as 2d6
+        assert_eq!(stats.min, 2);
+        assert_eq!(stats.max, 12);
+        assert!((stats.mean - 7.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_exact_pool_keep_highest() {
+        let expr = Parser::parse("{d6, d8}kh").expression().unwrap().clone();
+        let dist = compute_exact(&expr).unwrap();
+        let stats = dist.stats();
+
+        // {d6, d8}kh: keep highest of d6 and d8
+        // min: max(1,1) = 1, max: max(6,8) = 8
+        assert_eq!(stats.min, 1);
+        assert_eq!(stats.max, 8);
+        // Mean should be higher than 4.5 (average of 1-8) since we keep highest
+        assert!(stats.mean > 4.5);
+    }
+
+    #[test]
+    fn test_exact_pool_keep_lowest() {
+        let expr = Parser::parse("{d6, d8}kl").expression().unwrap().clone();
+        let dist = compute_exact(&expr).unwrap();
+        let stats = dist.stats();
+
+        // {d6, d8}kl: keep lowest of d6 and d8
+        // min: min(1,1) = 1, max: min(6,8) = 6
+        assert_eq!(stats.min, 1);
+        assert_eq!(stats.max, 6);
+        // Mean should be lower than 3.5 (average of 1-6) since we keep lowest
+        assert!(stats.mean < 3.5);
+    }
+
+    #[test]
+    fn test_exact_pool_count_success() {
+        let expr = Parser::parse("{d6, d6}cs>=5").expression().unwrap().clone();
+        let dist = compute_exact(&expr).unwrap();
+
+        // Count of groups where sum >= 5
+        // Possible counts: 0, 1, 2
+        // Uses scaled probabilities (1_000_000 factor)
+        assert!(dist.total > 0);
+        let stats = dist.stats();
+        assert_eq!(stats.min, 0);
+        assert_eq!(stats.max, 2);
+    }
+
+    #[test]
+    fn test_exact_pool_with_literal() {
+        let expr = Parser::parse("{d6, 10}kh").expression().unwrap().clone();
+        let dist = compute_exact(&expr).unwrap();
+        let stats = dist.stats();
+
+        // {d6, 10}kh: max(d6, 10) = always 10 since d6 max is 6
+        assert_eq!(stats.min, 10);
+        assert_eq!(stats.max, 10);
     }
 }
