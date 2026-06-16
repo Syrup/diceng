@@ -798,4 +798,50 @@ mod tests {
         // Total should be 6^4 = 1296 (all possible outcomes of 4d6)
         assert_eq!(dist.total, 1296);
     }
+
+    // ── Coverage Gap Tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_exact_fate_dice() {
+        let expr = Parser::parse("dF").expression().unwrap().clone();
+        let dist = compute_exact(&expr).unwrap();
+
+        // dF has 3 faces: -1, 0, 1
+        assert_eq!(dist.total, 3);
+        assert!((dist.probability(-1) - 1.0 / 3.0).abs() < 1e-10);
+        assert!((dist.probability(0) - 1.0 / 3.0).abs() < 1e-10);
+        assert!((dist.probability(1) - 1.0 / 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_exact_percent() {
+        let expr = Parser::parse("d%").expression().unwrap().clone();
+        let dist = compute_exact(&expr).unwrap();
+
+        // d% has 100 faces: 1-100
+        assert_eq!(dist.total, 100);
+        for i in 1..=100 {
+            assert!((dist.probability(i) - 1.0 / 100.0).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_exact_returns_none_for_emphasis() {
+        let expr = Parser::parse("d6 emphasis").expression().unwrap().clone();
+        let dist = compute_exact(&expr);
+        // Emphasis is unsupported for exact computation
+        assert!(dist.is_none());
+    }
+
+    #[test]
+    fn test_exact_unary_minus() {
+        let expr = Parser::parse("-d6").expression().unwrap().clone();
+        let dist = compute_exact(&expr).unwrap();
+
+        // -d6: values -6 to -1, each with probability 1/6
+        assert_eq!(dist.total, 6);
+        for i in -6..=-1 {
+            assert!((dist.probability(i) - 1.0 / 6.0).abs() < 1e-10);
+        }
+    }
 }

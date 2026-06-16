@@ -305,4 +305,78 @@ mod tests {
         assert!(output.contains("Count:"));
         assert!(output.contains("2"));
     }
+
+    // ── Coverage Gap Tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_render_verbose_literal() {
+        let dice = vec![DieEntry {
+            value: 42,
+            kept: true,
+            chain: None,
+            operator: None,
+            kind: Some(DieEntryKind::Literal),
+        }];
+        let output = render_verbose("42", 42, &dice);
+        assert!(output.contains("42"));
+        assert!(output.contains("Kept:"));
+    }
+
+    #[test]
+    fn test_render_verbose_separator() {
+        let dice = vec![
+            DieEntry {
+                value: 6,
+                kept: true,
+                chain: None,
+                operator: None,
+                kind: None,
+            },
+            DieEntry {
+                value: 0,
+                kept: false,
+                chain: None,
+                operator: Some("+".to_string()),
+                kind: Some(DieEntryKind::Separator),
+            },
+            DieEntry {
+                value: 4,
+                kept: true,
+                chain: None,
+                operator: None,
+                kind: Some(DieEntryKind::Literal),
+            },
+        ];
+        let output = render_verbose("d6 + 4", 10, &dice);
+        assert!(output.contains("+"));
+        assert!(output.contains("10"));
+    }
+
+    #[test]
+    fn test_render_verbose_reroll_chain() {
+        let dice = vec![DieEntry {
+            value: 4,
+            kept: true,
+            chain: Some(vec![1, 2, 4]),
+            operator: None,
+            kind: Some(DieEntryKind::Reroll),
+        }];
+        let output = render_verbose("d6 reroll on 1", 4, &dice);
+        assert!(output.contains("→"));
+        assert!(output.contains("Kept:"));
+    }
+
+    #[test]
+    fn test_render_verbose_min_cap_chain() {
+        let dice = vec![DieEntry {
+            value: 3,
+            kept: true,
+            chain: Some(vec![1, 3]),
+            operator: None,
+            kind: Some(DieEntryKind::MinCap),
+        }];
+        let output = render_verbose("d6mi3", 3, &dice);
+        assert!(output.contains("→"));
+        assert!(output.contains("Kept:"));
+    }
 }

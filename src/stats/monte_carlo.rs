@@ -182,6 +182,85 @@ mod tests {
         let result = monte_carlo(&expr, RandomRng::new(), &config);
 
         // Should converge for 3d6
+        assert!(
+            result.converged,
+            "Monte Carlo should converge for 3d6, relative_error={}",
+            result.relative_error
+        );
+        assert!(
+            result.relative_error < 0.05,
+            "Relative error {} should be < 0.05",
+            result.relative_error
+        );
         assert!(result.trials_run <= 100000);
+    }
+
+    #[test]
+    fn test_monte_carlo_with_progress() {
+        let expr = Parser::parse("d6").expression().unwrap().clone();
+        let config = MonteCarloConfig {
+            trials: 5000,
+            max_trials: 10000,
+            batch_size: 1000,
+            ..Default::default()
+        };
+
+        let mut progress_calls = 0usize;
+        let result =
+            monte_carlo_with_progress(&expr, RandomRng::new(), &config, |_current, _max| {
+                progress_calls += 1;
+            });
+
+        assert!(progress_calls > 0, "Progress callback should be called");
+        assert!(result.trials_run > 0);
+        assert!(result.distribution.total > 0);
+    }
+
+    #[test]
+    fn test_monte_carlo_deterministic() {
+        let expr = Parser::parse("d6").expression().unwrap().clone();
+        let config = MonteCarloConfig {
+            trials: 5000,
+            max_trials: 5000,
+            ..Default::default()
+        };
+
+        // Same seed should produce same results
+        let result1 = monte_carlo(&expr, LehmerRng::new(42), &config);
+        let result2 = monte_carlo(&expr, LehmerRng::new(42), &config);
+
+        assert_eq!(result1.distribution.total, result2.distribution.total);
+        for i in 1..=6 {
+            let p1 = result1.distribution.probability(i);
+            let p2 = result2.distribution.probability(i);
+            assert!(
+                (p1 - p2).abs() < 1e-10,
+                "Probability for {} should be deterministic: {} vs {}",
+                i,
+                p1,
+                p2
+            );
+        }
+    }
+
+    #[test]
+    fn test_monte_carlo_max_trials_cap() {
+        let expr = Parser::parse("d6").expression().unwrap().clone();
+        let config = MonteCarloConfig {
+            trials: 1_000_000,             // require many trials to converge
+            max_trials: 5000,              // but cap at 5000
+            target_relative_error: 0.0001, // very tight target
+            ..Default::default()
+        };
+
+        let result = monte_carlo(&expr, RandomRng::new(), &config);
+
+        // Should stop at max_trials even if not converged
+        assert!(
+            result.trials_run <= 5000,
+            "Should stop at max_trials, ran {}",
+            result.trials_run
+        );
+        assert_eq!(result.distribution.total, 5000);
     }
 }

@@ -184,8 +184,23 @@ mod tests {
         let result = parse("3d6!");
         assert!(result.success(), "3d6! should parse");
         let expr = result.expression().unwrap();
-        let roll_result = roll(expr);
+        // Use seeded roll for deterministic verification
+        let roll_result = roll_seeded(expr, 42);
         assert!(roll_result.value() >= 3, "3d6! value should be >= 3");
+        // Verify explosion can exceed normal max (18 for 3d6)
+        // Try multiple seeds to find one that explodes
+        let mut found_explode = false;
+        for seed in 1..100 {
+            let r = roll_seeded(expr, seed);
+            if r.value() > 18 {
+                found_explode = true;
+                break;
+            }
+        }
+        assert!(
+            found_explode,
+            "3d6! should sometimes exceed 18 (normal 3d6 max) due to explosions"
+        );
     }
 
     #[test]
@@ -193,8 +208,22 @@ mod tests {
         let result = parse("3d6!!");
         assert!(result.success(), "3d6!! should parse");
         let expr = result.expression().unwrap();
-        let roll_result = roll(expr);
+        // Use seeded roll for deterministic verification
+        let roll_result = roll_seeded(expr, 42);
         assert!(roll_result.value() >= 3, "3d6!! value should be >= 3");
+        // Verify compound can exceed normal max (18 for 3d6)
+        let mut found_compound = false;
+        for seed in 1..100 {
+            let r = roll_seeded(expr, seed);
+            if r.value() > 18 {
+                found_compound = true;
+                break;
+            }
+        }
+        assert!(
+            found_compound,
+            "3d6!! should sometimes exceed 18 (normal 3d6 max) due to compounding"
+        );
     }
 
     #[test]
@@ -303,5 +332,35 @@ mod tests {
             roll_result.value() >= 0 && roll_result.value() <= 4,
             "4d6cs>=4 count should be in [0, 4]"
         );
+    }
+
+    // ── Error Path Tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_invalid_returns_error() {
+        let result = parse("@#invalid");
+        assert!(!result.success());
+        assert!(!result.errors().is_empty());
+    }
+
+    #[test]
+    fn test_parse_empty_returns_error() {
+        let result = parse("");
+        assert!(!result.success());
+        assert!(!result.errors().is_empty());
+    }
+
+    #[test]
+    fn test_parse_d0_returns_error() {
+        let result = parse("d0");
+        assert!(!result.success());
+        assert!(!result.errors().is_empty());
+    }
+
+    #[test]
+    fn test_parse_unterminated_dice_returns_error() {
+        let result = parse("3d");
+        assert!(!result.success());
+        assert!(!result.errors().is_empty());
     }
 }

@@ -994,4 +994,298 @@ mod tests {
         let result = roller.roll(&expr);
         assert!(result.value() >= 3 && result.value() <= 18);
     }
+
+    // ── Roller Coverage Tests (Deterministic) ─────────────────────────
+
+    #[test]
+    fn test_roll_explode_deterministic() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("3d6!").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        // Explode can exceed normal max of 18
+        assert!(result.value() >= 3, "3d6! should be >= 3");
+        // Not all rolls explode, so just verify the value is valid
+        assert!(result.value() >= 3);
+    }
+
+    #[test]
+    fn test_roll_explode_can_exceed_max() {
+        let expr = Parser::parse("d6!").expression().unwrap().clone();
+        // Try multiple seeds to find one that explodes
+        // LehmerRng needs seeds near M to produce 6 (max) on first roll
+        let mut found_explode = false;
+        for seed in 1789569700u32..1789569710 {
+            let mut roller = Roller::new(LehmerRng::new(seed));
+            let result = roller.roll(&expr);
+            if result.value() > 6 {
+                found_explode = true;
+                break;
+            }
+        }
+        assert!(
+            found_explode,
+            "d6! should sometimes exceed 6 due to explosions"
+        );
+    }
+
+    #[test]
+    fn test_roll_compound_deterministic() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("3d6!!").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        assert!(result.value() >= 3, "3d6!! should be >= 3");
+    }
+
+    #[test]
+    fn test_roll_reroll_deterministic() {
+        let expr = Parser::parse("3d6 reroll on 1")
+            .expression()
+            .unwrap()
+            .clone();
+        // With reroll on 1, no die should show 1 in the final result
+        // (though chain may contain 1s as discarded rolls)
+        for seed in 1..50 {
+            let mut roller = Roller::new(LehmerRng::new(seed));
+            let result = roller.roll(&expr);
+            assert!(result.value() >= 3, "3d6 reroll on 1 should be >= 3");
+        }
+    }
+
+    #[test]
+    fn test_roll_reroll_once_deterministic() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("2d6ro1").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        assert!(result.value() >= 2 && result.value() <= 12);
+    }
+
+    #[test]
+    fn test_roll_min_cap_deterministic() {
+        let expr = Parser::parse("4d6mi3").expression().unwrap().clone();
+        for seed in 1..50 {
+            let mut roller = Roller::new(LehmerRng::new(seed));
+            let result = roller.roll(&expr);
+            // Each die is at least 3, so sum >= 12
+            assert!(
+                result.value() >= 12,
+                "4d6mi3 should be >= 12, got {} with seed {}",
+                result.value(),
+                seed
+            );
+        }
+    }
+
+    #[test]
+    fn test_roll_max_cap_deterministic() {
+        let expr = Parser::parse("4d6ma4").expression().unwrap().clone();
+        for seed in 1..50 {
+            let mut roller = Roller::new(LehmerRng::new(seed));
+            let result = roller.roll(&expr);
+            // Each die is at most 4, so sum <= 16
+            assert!(
+                result.value() <= 16,
+                "4d6ma4 should be <= 16, got {} with seed {}",
+                result.value(),
+                seed
+            );
+        }
+    }
+
+    #[test]
+    fn test_roll_drop_deterministic() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("4d6 drop 1").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        assert!(result.value() >= 3 && result.value() <= 18);
+        // Verify it's a Filtered result
+        match &result {
+            RollResult::Filtered { kept, dropped, .. } => {
+                assert_eq!(kept.len(), 3);
+                assert_eq!(dropped.len(), 1);
+            }
+            _ => panic!("Expected Filtered result for 4d6 drop 1"),
+        }
+    }
+
+    #[test]
+    fn test_roll_keep_middle_deterministic() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("5d6 keep middle 3")
+            .expression()
+            .unwrap()
+            .clone();
+        let result = roller.roll(&expr);
+        assert!(result.value() >= 3 && result.value() <= 18);
+    }
+
+    #[test]
+    fn test_roll_count_success_deterministic() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("4d6cs>=4").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        assert!(result.value() >= 0 && result.value() <= 4);
+        match &result {
+            RollResult::Counted { count, .. } => {
+                assert!(*count <= 4);
+            }
+            _ => panic!("Expected Counted result for 4d6cs>=4"),
+        }
+    }
+
+    #[test]
+    fn test_roll_target_deterministic() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("4d6t4").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        assert!(result.value() >= 0 && result.value() <= 4);
+    }
+
+    #[test]
+    fn test_roll_dice_set_sum() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("(2d6, 3d6) sum")
+            .expression()
+            .unwrap()
+            .clone();
+        let result = roller.roll(&expr);
+        // 2d6: [2,12], 3d6: [3,18], sum: [5,30]
+        assert!(result.value() >= 5 && result.value() <= 30);
+        match &result {
+            RollResult::DiceSet { reducer, .. } => {
+                assert_eq!(*reducer, Reducer::Sum);
+            }
+            _ => panic!("Expected DiceSet result"),
+        }
+    }
+
+    #[test]
+    fn test_roll_dice_set_max() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("[d6, d8] max").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        assert!(result.value() >= 1 && result.value() <= 8);
+    }
+
+    #[test]
+    fn test_roll_unary_minus() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("-d6 + 10").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        // -d6: [-6, -1], + 10: [4, 9]
+        assert!(result.value() >= 4 && result.value() <= 9);
+        match &result {
+            RollResult::BinaryOp { op, .. } => {
+                assert_eq!(*op, BinaryOp::Add);
+            }
+            _ => panic!("Expected BinaryOp result"),
+        }
+    }
+
+    #[test]
+    fn test_roll_division_by_zero() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("3d6 / 0").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        // Division by zero returns 0
+        assert_eq!(result.value(), 0);
+    }
+
+    #[test]
+    fn test_roll_max_dice_count_overflow() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        // Exceed MAX_DICE_COUNT (10000)
+        let expr = Parser::parse("99999d6").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        // Returns Literal 0 for overflow
+        assert_eq!(result.value(), 0);
+    }
+
+    #[test]
+    fn test_roll_dice_values() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("3d6").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        let values = result.dice_values();
+        assert_eq!(values.len(), 3);
+        for v in &values {
+            assert!(*v >= 1 && *v <= 6);
+        }
+    }
+
+    #[test]
+    fn test_roll_to_verbose_entries() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("4d6 keep 3").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        let entries = result.to_verbose_entries();
+        // 4d6k3: 3 kept + 1 dropped = 4 entries
+        assert_eq!(entries.len(), 4);
+        let kept_count = entries.iter().filter(|e| e.kept).count();
+        let dropped_count = entries.iter().filter(|e| !e.kept).count();
+        assert_eq!(kept_count, 3);
+        assert_eq!(dropped_count, 1);
+    }
+
+    #[test]
+    fn test_roll_to_verbose_entries_literal() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("42").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        let entries = result.to_verbose_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].value, 42);
+        assert!(entries[0].kept);
+    }
+
+    #[test]
+    fn test_roll_to_verbose_entries_binary_op() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("2d6 + 4").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        let entries = result.to_verbose_entries();
+        // 2 dice + 1 separator + 1 literal = 4 entries
+        assert_eq!(entries.len(), 4);
+        // One entry should be a separator
+        let separators: Vec<_> = entries.iter().filter(|e| e.operator.is_some()).collect();
+        assert_eq!(separators.len(), 1);
+        assert_eq!(separators[0].operator.as_deref().unwrap(), "+");
+    }
+
+    #[test]
+    fn test_functor_limit_max_count() {
+        assert_eq!(FunctorLimit::Always.max_count(), 100);
+        assert_eq!(FunctorLimit::Once.max_count(), 1);
+        assert_eq!(FunctorLimit::Twice.max_count(), 2);
+        assert_eq!(FunctorLimit::Thrice.max_count(), 3);
+        assert_eq!(FunctorLimit::Times(5).max_count(), 5);
+    }
+
+    #[test]
+    fn test_roll_sort_ascending() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("4d6sa").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        // Just verify it produces a valid result
+        assert!(result.value() >= 4 && result.value() <= 24);
+    }
+
+    #[test]
+    fn test_roll_explode_with_condition() {
+        let expr = Parser::parse("d6!>=5").expression().unwrap().clone();
+        // With explode on >=5, the die explodes when showing 5 or 6
+        for seed in 1..100 {
+            let mut roller = Roller::new(LehmerRng::new(seed));
+            let result = roller.roll(&expr);
+            assert!(result.value() >= 1, "d6!>=5 should be >= 1");
+        }
+    }
+
+    #[test]
+    fn test_roll_emphasis_deterministic() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("d6 emphasis").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        // Emphasis picks the die furthest from center (3.5 for d6)
+        assert!(result.value() >= 1 && result.value() <= 6);
+    }
 }

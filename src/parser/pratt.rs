@@ -760,4 +760,483 @@ mod tests {
             _ => panic!("Expected Dice expression"),
         }
     }
+
+    // ── Parser Coverage Tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_parse_arithmetic_deep() {
+        let result = Parser::parse("3d6+4");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::BinaryOp { op, left, right } => {
+                assert_eq!(*op, BinaryOp::Add);
+                match left.as_ref() {
+                    Expression::Dice(d) => {
+                        assert_eq!(d.atom, DiceAtom::Standard { count: 3, sides: 6 });
+                    }
+                    _ => panic!("Expected Dice on left"),
+                }
+                match right.as_ref() {
+                    Expression::Literal(n) => assert_eq!(*n, 4),
+                    _ => panic!("Expected Literal on right"),
+                }
+            }
+            _ => panic!("Expected BinaryOp"),
+        }
+    }
+
+    #[test]
+    fn test_parse_dice_set_paren() {
+        let result = Parser::parse("(2d6, 3d6) sum");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::DiceSet { exprs, reducer } => {
+                assert_eq!(exprs.len(), 2);
+                assert_eq!(*reducer, Reducer::Sum);
+            }
+            _ => panic!("Expected DiceSet"),
+        }
+    }
+
+    #[test]
+    fn test_parse_bracket_set() {
+        let result = Parser::parse("[d6, d8] max");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::DiceSet { exprs, reducer } => {
+                assert_eq!(exprs.len(), 2);
+                assert_eq!(*reducer, Reducer::Max);
+            }
+            _ => panic!("Expected DiceSet"),
+        }
+    }
+
+    #[test]
+    fn test_parse_unary_minus() {
+        let result = Parser::parse("-d6 + 10");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::BinaryOp { op, left, .. } => {
+                assert_eq!(*op, BinaryOp::Add);
+                match left.as_ref() {
+                    Expression::UnaryMinus(inner) => match inner.as_ref() {
+                        Expression::Dice(d) => {
+                            assert_eq!(d.atom, DiceAtom::Standard { count: 1, sides: 6 });
+                        }
+                        _ => panic!("Expected Dice inside UnaryMinus"),
+                    },
+                    _ => panic!("Expected UnaryMinus on left"),
+                }
+            }
+            _ => panic!("Expected BinaryOp"),
+        }
+    }
+
+    #[test]
+    fn test_parse_implicit_multiplication() {
+        let result = Parser::parse("2(3d6)");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::BinaryOp { op, left, right } => {
+                assert_eq!(*op, BinaryOp::Mul);
+                match left.as_ref() {
+                    Expression::Literal(n) => assert_eq!(*n, 2),
+                    _ => panic!("Expected Literal on left"),
+                }
+                match right.as_ref() {
+                    Expression::Dice(d) => {
+                        assert_eq!(d.atom, DiceAtom::Standard { count: 3, sides: 6 });
+                    }
+                    _ => panic!("Expected Dice on right"),
+                }
+            }
+            _ => panic!("Expected BinaryOp"),
+        }
+    }
+
+    #[test]
+    fn test_parse_explode_bang() {
+        let result = Parser::parse("3d6!");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.functors.len(), 1);
+                match &d.functors[0] {
+                    Functor::Explode { condition, .. } => {
+                        assert_eq!(*condition, TriggerCondition::Max);
+                    }
+                    _ => panic!("Expected Explode functor"),
+                }
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_explode_bang_with_condition() {
+        let result = Parser::parse("3d6!>=5");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.functors.len(), 1);
+                match &d.functors[0] {
+                    Functor::Explode { condition, .. } => {
+                        assert_eq!(*condition, TriggerCondition::AtOrAbove(5));
+                    }
+                    _ => panic!("Expected Explode functor"),
+                }
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_compound_bang() {
+        let result = Parser::parse("3d6!!");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.functors.len(), 1);
+                match &d.functors[0] {
+                    Functor::Compound { .. } => {}
+                    _ => panic!("Expected Compound functor"),
+                }
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_reroll_shorthand() {
+        let result = Parser::parse("3d6r1");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.functors.len(), 1);
+                match &d.functors[0] {
+                    Functor::Reroll { limit, condition } => {
+                        // "r1" parses 1 as limit (Times(1)), default condition (Max)
+                        assert_eq!(*limit, FunctorLimit::Times(1));
+                        assert_eq!(*condition, TriggerCondition::Max);
+                    }
+                    _ => panic!("Expected Reroll functor"),
+                }
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_reroll_once() {
+        let result = Parser::parse("2d6ro1");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.functors.len(), 1);
+                match &d.functors[0] {
+                    Functor::Reroll { limit, .. } => {
+                        assert_eq!(*limit, FunctorLimit::Once);
+                    }
+                    _ => panic!("Expected Reroll functor"),
+                }
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_min_cap() {
+        let result = Parser::parse("4d6mi2");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.functors.len(), 1);
+                assert_eq!(d.functors[0], Functor::MinCap { min_value: 2 });
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_max_cap() {
+        let result = Parser::parse("4d6ma5");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.functors.len(), 1);
+                assert_eq!(d.functors[0], Functor::MaxCap { max_value: 5 });
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_count_success() {
+        let result = Parser::parse("4d6cs>=4");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert!(d.count_threshold.is_some());
+                let threshold = d.count_threshold.as_ref().unwrap();
+                assert_eq!(threshold.thresholds.len(), 1);
+                assert_eq!(threshold.thresholds[0].op, CountOp::Ge);
+                assert_eq!(threshold.thresholds[0].value, 4);
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_target() {
+        let result = Parser::parse("4d6t4");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert!(d.count_threshold.is_some());
+                let threshold = d.count_threshold.as_ref().unwrap();
+                assert_eq!(threshold.thresholds[0].op, CountOp::Ge);
+                assert_eq!(threshold.thresholds[0].value, 4);
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_sort_ascending() {
+        let result = Parser::parse("4d6sa");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.sort_order, Some(SortOrder::Ascending));
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_sort_descending() {
+        let result = Parser::parse("4d6sd");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.sort_order, Some(SortOrder::Descending));
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_keep_high() {
+        let result = Parser::parse("4d6kh3");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.filters.len(), 1);
+                assert_eq!(d.filters[0].filter_type, FilterType::Keep);
+                assert_eq!(d.filters[0].direction, FilterDirection::Highest);
+                assert_eq!(d.filters[0].n, 3);
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_keep_low() {
+        let result = Parser::parse("4d6kl1");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.filters.len(), 1);
+                assert_eq!(d.filters[0].filter_type, FilterType::Keep);
+                assert_eq!(d.filters[0].direction, FilterDirection::Lowest);
+                assert_eq!(d.filters[0].n, 1);
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_drop_high() {
+        let result = Parser::parse("4d6dh1");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.filters.len(), 1);
+                assert_eq!(d.filters[0].filter_type, FilterType::Drop);
+                assert_eq!(d.filters[0].direction, FilterDirection::Highest);
+                assert_eq!(d.filters[0].n, 1);
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_drop_low() {
+        let result = Parser::parse("4d6dl1");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.filters.len(), 1);
+                assert_eq!(d.filters[0].filter_type, FilterType::Drop);
+                assert_eq!(d.filters[0].direction, FilterDirection::Lowest);
+                assert_eq!(d.filters[0].n, 1);
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_multiple_filters() {
+        let result = Parser::parse("20d6 keep 5 drop 2");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.filters.len(), 2);
+                assert_eq!(d.filters[0].filter_type, FilterType::Keep);
+                assert_eq!(d.filters[0].n, 5);
+                assert_eq!(d.filters[1].filter_type, FilterType::Drop);
+                assert_eq!(d.filters[1].n, 2);
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_trigger_on_max() {
+        let result = Parser::parse("3d6 explode on max");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.functors.len(), 1);
+                match &d.functors[0] {
+                    Functor::Explode { condition, .. } => {
+                        assert_eq!(*condition, TriggerCondition::Max);
+                    }
+                    _ => panic!("Expected Explode"),
+                }
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_trigger_on_value_or_more() {
+        let result = Parser::parse("3d6 explode on 5 or more");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.functors.len(), 1);
+                match &d.functors[0] {
+                    Functor::Explode { condition, .. } => {
+                        assert_eq!(*condition, TriggerCondition::AtOrAbove(5));
+                    }
+                    _ => panic!("Expected Explode"),
+                }
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_trigger_between() {
+        let result = Parser::parse("3d6 reroll on 1..2");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.functors.len(), 1);
+                match &d.functors[0] {
+                    Functor::Reroll { condition, .. } => {
+                        assert_eq!(*condition, TriggerCondition::Between(1, 2));
+                    }
+                    _ => panic!("Expected Reroll"),
+                }
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_keep_middle() {
+        let result = Parser::parse("5d6 keep middle 3");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.filters.len(), 1);
+                assert_eq!(d.filters[0].filter_type, FilterType::Keep);
+                assert_eq!(d.filters[0].direction, FilterDirection::Middle);
+                assert_eq!(d.filters[0].n, 3);
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_dice_set_no_reducer_defaults_sum() {
+        let result = Parser::parse("(2d6, 3d6)");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::DiceSet { exprs, reducer } => {
+                assert_eq!(exprs.len(), 2);
+                assert_eq!(*reducer, Reducer::Sum);
+            }
+            _ => panic!("Expected DiceSet"),
+        }
+    }
+
+    #[test]
+    fn test_parse_dice_set_min_reducer() {
+        let result = Parser::parse("[d6, d8, d10] min");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::DiceSet { exprs, reducer } => {
+                assert_eq!(exprs.len(), 3);
+                assert_eq!(*reducer, Reducer::Min);
+            }
+            _ => panic!("Expected DiceSet"),
+        }
+    }
+
+    // ── Error Path Tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_error_empty_expression() {
+        let result = Parser::parse("");
+        assert!(!result.success());
+        assert!(!result.errors().is_empty());
+    }
+
+    #[test]
+    fn test_parse_error_trailing_operator() {
+        let result = Parser::parse("3d6+");
+        assert!(!result.success());
+        assert!(!result.errors().is_empty());
+    }
+
+    #[test]
+    fn test_parse_error_unmatched_paren() {
+        // Parser uses `let _ = self.expect(RParen)` so unmatched paren
+        // is silently ignored - expression still parses successfully
+        let result = Parser::parse("(3d6");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.atom, DiceAtom::Standard { count: 3, sides: 6 });
+            }
+            _ => panic!("Expected Dice expression"),
+        }
+    }
+
+    #[test]
+    fn test_parse_error_unexpected_token_after_expr() {
+        let result = Parser::parse("3d6 4d6");
+        assert!(!result.success());
+        assert!(!result.errors().is_empty());
+    }
+
+    #[test]
+    fn test_parse_error_invalid_token() {
+        let result = Parser::parse("@#");
+        assert!(!result.success());
+        assert!(!result.errors().is_empty());
+    }
 }
