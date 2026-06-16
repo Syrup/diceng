@@ -1,0 +1,31 @@
+[package]
+name = "diceng"
+version = "1.0.0"
+edition = "2021"
+description = "Fast dice expression parser, roller, and probability analyzer"
+license = "MIT"
+repository = "https://github.com/Syrup/diceng"
+homepage = "https://github.com/Syrup/diceng"
+keywords = ["dice", "roller", "probability", "rng", "parser"]
+categories = ["command-line-utilities", "game-development", "mathematics"]
+
+[features]
+default = ["cli"]
+cli = ["clap", "cap", "serde_json"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+rand = "0.8"
+terminal_size = "0.4"
+colored = "2"
+clap = { version = "4", features = ["derive"], optional = true }
+cap = { version = "0.1", optional = true }
+serde_json = { version = "1", optional = true }
+
+[dev-dependencies]
+proptest = "1"
+
+[[bin]]
+name = "diceng"
+path = "src/main.rs"
+required-features = ["cli"]
