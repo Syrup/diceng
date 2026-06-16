@@ -1,28 +1,28 @@
 # diceng
 
-![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
-![License](https://img.shields.io/badge/license-MIT-blue)
-![Version](https://img.shields.io/badge/version-1.0.0-green)
-![CI](https://github.com/Syrup/diceng/actions/workflows/ci.yml/badge.svg)
-![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows%20%7C%20android-lightgrey)
-![GitHub Stars](https://img.shields.io/github/stars/Syrup/diceng?style=social)
+![Rust](https://shieldcn.dev/badge/Rust-2021%20Edition.svg?size=default&theme=zinc&font=jetbrains-mono&logo=rust)
+![License](https://shieldcn.dev/github/Syrup/diceng/license.svg?variant=branded&size=default&theme=zinc&font=jetbrains-mono)
+![Version](https://shieldcn.dev/github/Syrup/diceng/release.svg?variant=branded&size=default&theme=zinc&font=jetbrains-mono)
+![CI](https://shieldcn.dev/github/Syrup/diceng/ci.svg?size=default&theme=zinc&font=jetbrains-mono)
+![Platform](https://shieldcn.dev/badge/platform-Linux%20|%20MacOS%20|%20Android.svg?size=default&theme=zinc&font=jetbrains-mono&logo=lu%3AComputer)
+![GitHub Stars](https://www.shieldcn.dev/github/stars/Syrup/diceng.svg?variant=branded&mode=dark&theme=zinc&font=jetbrains-mono)
 
-> Fast dice expression parser, roller, and probability analyzer written in Rust.
+> A dice expression parser and roller, with probability analysis thrown in.
 
 ## Features
 
-- **Parse** standard dice notation — `d6`, `3d6`, `d20`, `d%`, `dF`, `dF.2`, custom faces
-- **Roll20/Foundry compatible** — `!` explode, `kh`/`kl`/`dh`/`dl`, `!!` compound, `cs` count
-- **Roll** with true random or seeded (deterministic, reproducible) RNG
-- **Exact probability** computation via convolution + dynamic programming (Eisenstat's algorithm)
-- **Monte Carlo** simulation fallback with automatic convergence detection
-- **Rich modifiers** — keep/drop (highest/lowest/middle), explode, reroll, compound, emphasis, min/max cap
-- **Arithmetic expressions** with proper operator precedence (`3d6 + 2d4 * 2`)
-- **Dice sets** with reducers — sum, min, max, average, median
-- **Count thresholds** — `4d6 c>=5` or `4d6t4` counts dice meeting a condition
-- **Unicode support** — `×`, `⋅`, `÷`, `≥`, `≤`, `≠` operators
-- **CLI** with text and JSON output formats
-- **Multi-platform** — Linux, macOS, Windows, Android (Termux)
+- Standard dice notation: `d6`, `3d6`, `d20`, `d%`, `dF`, `dF.2`, custom faces
+- Roll20/Foundry compatible: `!` explode, `kh`/`kl`/`dh`/`dl`, `!!` compound, `cs` count
+- True random or seeded (deterministic, reproducible) RNG
+- Exact probability via convolution + dynamic programming (Eisenstat's algorithm)
+- Monte Carlo simulation fallback with automatic convergence detection
+- Keep/drop (highest/lowest/middle), explode, reroll, compound, emphasis, min/max cap
+- Arithmetic expressions with proper operator precedence (`3d6 + 2d4 * 2`)
+- Dice sets with reducers: sum, min, max, average, median
+- Count thresholds: `4d6 c>=5` or `4d6t4` counts dice meeting a condition
+- Unicode operators: `×`, `⋅`, `÷`, `≥`, `≤`, `≠`
+- CLI with text and JSON output
+- Linux, macOS, Windows, Android (Termux)
 
 ## Installation
 
@@ -45,7 +45,7 @@ cargo install diceng
 
 ```toml
 [dependencies]
-diceng = "0.1"
+diceng = "1.0"
 ```
 
 ## Quick Start
@@ -69,7 +69,9 @@ diceng check "3d6e5 + 2d4"
 
 ## Usage
 
-### `roll` — Roll a dice expression
+### `roll`
+
+Roll a dice expression.
 
 ```bash
 diceng roll <expression> [options]
@@ -80,8 +82,6 @@ diceng roll <expression> [options]
 | `--verbose` | `-v` | Show detailed roll breakdown |
 | `--format <fmt>` | `-f` | Output format: `text` (default) or `json` |
 | `--seed <n>` | | Deterministic seed for reproducible rolls |
-
-**Examples:**
 
 ```bash
 diceng roll 4d6k3 -v
@@ -101,7 +101,9 @@ diceng roll 2d6 -f json
 # }
 ```
 
-### `stats` — Compute probability distribution
+### `stats`
+
+Compute probability distribution.
 
 ```bash
 diceng stats <expression> [options]
@@ -112,8 +114,6 @@ diceng stats <expression> [options]
 | `--format <fmt>` | `-f` | Output format: `text` (default) or `json` |
 | `--trials <n>` | | Monte Carlo trials if exact fails (default: 100000) |
 | `--precision <n>` | | Decimal places for probabilities (default: 4) |
-
-**Example:**
 
 ```bash
 diceng stats 2d6
@@ -134,13 +134,13 @@ diceng stats 2d6
 #       12     0.0278     0.0278     1.0000          1
 ```
 
-### `check` — Validate a dice expression
+### `check`
+
+Validate a dice expression.
 
 ```bash
 diceng check <expression>
 ```
-
-**Example:**
 
 ```bash
 diceng check "4d6k3"
@@ -153,7 +153,7 @@ diceng check "invalid"
 
 ## Supported Dice Notation
 
-### Dice Types
+### Dice types
 
 | Type | Syntax | Example | Description |
 |------|--------|---------|-------------|
@@ -163,21 +163,21 @@ diceng check "invalid"
 | Variable Fudge | `NdF.N` | `dF.2` | Faces: -2, -1, 0, 0, +1, +2 |
 | Custom | `Nd{faces}` | `d{1,2,3}` | Arbitrary face values |
 
-### Modifiers (Functors)
+### Modifiers
 
 | Modifier | Standard | diceng | Long form | Example |
 |----------|----------|----------|-----------|---------|
 | Explode | `!` | `e` | `explode` | `3d6!` or `3d6e5` |
 | Compound | `!!` | `ce` | `compound` | `3d6!!` or `3d6ce6` |
-| Reroll | | `r` | `reroll` | `3d6r1` — reroll 1s |
-| Reroll once | `ro` | | | `2d6ro1` — reroll 1s once |
-| Emphasis | | | `emphasis` | `2d6 emphasis` — furthest from center |
-| Min cap | `mi` | | | `4d6mi2` — minimum 2 per die |
-| Max cap | `ma` | | | `4d6ma5` — maximum 5 per die |
+| Reroll | | `r` | `reroll` | `3d6r1`, reroll 1s |
+| Reroll once | `ro` | | | `2d6ro1`, reroll 1s once |
+| Emphasis | | | `emphasis` | `2d6 emphasis`, furthest from center |
+| Min cap | `mi` | | | `4d6mi2`, minimum 2 per die |
+| Max cap | `ma` | | | `4d6ma5`, maximum 5 per die |
 
-**Explode conditions:** `3d6!` (on max), `3d6!>=5`, `3d6!>5`, `3d6!5`
+Explode conditions: `3d6!` (on max), `3d6!>=5`, `3d6!>5`, `3d6!5`
 
-**Limits:** `once`, `twice`, `thrice`, `N times`
+Limits: `once`, `twice`, `thrice`, `N times`
 
 ### Filters
 
@@ -191,19 +191,19 @@ diceng check "invalid"
 | Sort ascending | `sa` | | | `4d6sa` |
 | Sort descending | `sd` | | | `4d6sd` |
 
-### Count Thresholds
+### Count thresholds
 
 Count dice meeting a condition:
 
 ```
-4d6 c>=5       — count dice >= 5
-4d6 c6         — count dice equal to 6
-4d6 c>=3 c<=5  — count dice between 3 and 5
-4d6 cs>=4      — count successes (same as c>=4)
-4d6 t4         — target number 4 (defaults to >=4)
+4d6 c>=5, count dice >= 5
+4d6 c6, count dice equal to 6
+4d6 c>=3 c<=5, count dice between 3 and 5
+4d6 cs>=4, count successes (same as c>=4)
+4d6 t4, target number 4 (defaults to >=4)
 ```
 
-### Reducers (for Dice Sets)
+### Reducers
 
 | Reducer | Example |
 |---------|---------|
@@ -216,64 +216,32 @@ Count dice meeting a condition:
 ### Arithmetic
 
 ```
-3d6 + 4          — addition
-2d6 * 3          — multiplication
-(3d6 + 2) * 2    — with parentheses
--d6 + 10         — unary minus
+3d6 + 4, addition
+2d6 * 3, multiplication
+(3d6 + 2) * 2, with parentheses
+-d6 + 10, unary minus
 ```
 
-**Operators:** `+`, `-`, `*`, `/` (and Unicode `×`, `⋅`, `÷`)
+Operators: `+`, `-`, `*`, `/` (and Unicode `×`, `⋅`, `÷`)
 
 ## Architecture
 
+```mermaid
+graph TD
+    A["Input: 4d6k3"] --> B[Lexer<br>lexer.rs]
+    B --> C[Pratt Parser<br>pratt.rs]
+    C --> D[AST Expression]
+    D --> E[Roller<br>eval.rs + rng.rs]
+    D --> F[Stats<br>exact.rs / monte_carlo.rs]
+    E --> G[RollResult tree]
+    F --> H[ProbabilitiesResult]
+    G --> I[Display terminal]
+    H --> J[Stats table]
 ```
-                    ┌─────────────┐
-                    │   Input     │
-                    │  "4d6k3"    │
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │    Lexer    │
-                    │  lexer.rs   │
-                    └──────┬──────┘
-                           │ Token stream
-                    ┌──────▼──────┐
-                    │ Pratt Parser│
-                    │  pratt.rs   │
-                    └──────┬──────┘
-                           │ AST (Expression)
-                ┌──────────┼──────────┐
-                │                     │
-         ┌──────▼──────┐      ┌──────▼──────┐
-         │   Roller    │      │    Stats    │
-         │  eval.rs    │      │ exact.rs /  │
-         │ + rng.rs    │      │ monte_carlo │
-         └──────┬──────┘      └──────┬──────┘
-                │                     │
-         ┌──────▼──────┐      ┌──────▼──────┐
-         │ RollResult  │      │Probabilities│
-         │  (tree)     │      │   Result    │
-         └──────┬──────┘      └──────┬──────┘
-                │                     │
-         ┌──────▼──────┐      ┌──────▼──────┐
-         │  Display    │      │    Stats    │
-         │ (terminal)  │      │  (table)    │
-         └─────────────┘      └─────────────┘
-```
-
-### Modules
-
-| Module | Purpose |
-|--------|---------|
-| `parser/` | Lexer (788 LOC) + Pratt parser (612 LOC) → AST |
-| `roller/` | Dice roller engine (798 LOC) + RNG trait + implementations |
-| `stats/` | Exact probability via DP (757 LOC) + Monte Carlo simulation |
-| `display.rs` | Terminal verbose output with colors |
-| `types.rs` | Shared enums and structs |
 
 ## API Reference
 
-### Convenience Functions
+### Convenience functions
 
 ```rust
 use diceng::*;
@@ -300,10 +268,10 @@ let dist = monte_carlo_distribution(expr, 100_000);
 let dist = compute_distribution(expr, 100_000);
 ```
 
-### Key Types
+### Key types
 
 ```rust
-// RNG trait — implement custom randomness source
+// RNG trait, implement custom randomness source
 pub trait DiceRng {
     fn roll(&mut self, sides: u32) -> u32;
 }
@@ -329,9 +297,40 @@ pub struct Stats {
 }
 ```
 
-## Multi-platform Build
+## Algorithm
 
-diceng uses a Makefile for cross-compilation:
+### Lehmer/Park-Miller PRNG
+
+The seeded RNG uses MINSTD (Park, Miller & Stockmeyer, 1993):
+
+```
+X_{n+1} = (48271 * X_n) mod (2^31 - 1)
+```
+
+- Period: 2,147,483,646 (~2.1 billion values)
+- Same seed always produces the same sequence
+- Uses `u64` widening to avoid overflow
+
+### Eisenstat's DP algorithm
+
+Exact probability for keep/drop filters uses dynamic programming instead of brute-force:
+
+| Approach | Complexity |
+|----------|-----------|
+| Brute force | O(sides^count) |
+| Eisenstat's DP | O(count^3 * sides^2 * drop) |
+
+For `10d6 keep 3`, brute force = 6^10 ~ 60M iterations. DP = ~10K operations.
+
+### Memory safety
+
+- 1GB allocator cap (via `cap` crate) prevents runaway memory usage
+- `MAX_DICE_COUNT = 10,000` limits dice pool size
+- Overflow-checked arithmetic in probability calculations
+
+## Multi-platform build
+
+diceng has a Makefile for cross-compilation:
 
 ```bash
 # Default: Linux x86_64
@@ -363,7 +362,7 @@ make check      # fmt + clippy + test
 make clean      # clean artifacts
 ```
 
-### Android Setup
+### Android setup
 
 ```bash
 make build PLATFORM=android
@@ -377,37 +376,6 @@ make build PLATFORM=android
 # Install now? [y/N] y
 # Downloading Android NDK r27c...
 ```
-
-## Algorithm
-
-### Lehmer/Park-Miller PRNG
-
-The seeded RNG uses the MINSTD variant (Park, Miller & Stockmeyer, 1993):
-
-```
-X_{n+1} = (48271 * X_n) mod (2^31 - 1)
-```
-
-- **Period:** 2,147,483,646 (~2.1 billion unique values)
-- **Deterministic:** Same seed always produces the same sequence
-- **Overflow-safe:** Uses `u64` widening for multiplication
-
-### Eisenstat's DP Algorithm
-
-Exact probability for keep/drop filters uses dynamic programming instead of brute-force enumeration:
-
-| Approach | Complexity |
-|----------|-----------|
-| Brute force | O(sides^count) |
-| Eisenstat's DP | O(count^3 * sides^2 * drop) |
-
-For `10d6 keep 3`, brute force = 6^10 ≈ 60M iterations. DP = ~10K operations.
-
-### Memory Safety
-
-- 1GB allocator cap via the `cap` crate prevents runaway memory usage
-- `MAX_DICE_COUNT = 10,000` limits dice pool size
-- Overflow-checked arithmetic in probability calculations
 
 ## Contributing
 
@@ -426,4 +394,4 @@ make check
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT. See [LICENSE](LICENSE) for details.
