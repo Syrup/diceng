@@ -1,4 +1,5 @@
 pub mod display;
+pub mod ffi;
 pub mod parser;
 pub mod roller;
 pub mod stats;

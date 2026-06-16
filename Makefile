@@ -20,7 +20,7 @@ MACOS_ARCH   ?= aarch64
 WINDOWS_ARCH ?= x86_64
 
 .PHONY: help build build-all strip release install check clean \
-	ensure-target check-deps setup-ndk \
+	ensure-target check-deps setup-ndk build-so \
 	_build-android _build-linux _build-macos _build-windows \
 	android-install
 
@@ -30,6 +30,7 @@ help:
 	@echo "Usage:"
 	@echo "  make build [PLATFORM=...] [ARCH=...]   Build for target platform"
 	@echo "  make build-all                          Build all platforms"
+	@echo "  make build-so                           Build shared library (.so) for FFI"
 	@echo "  make strip                              Strip debug symbols from dist/"
 	@echo "  make release [PLATFORM=...] [ARCH=...]  Build + strip"
 	@echo "  make android-install                    Push Android build via ADB"
@@ -162,6 +163,17 @@ _build-windows:
 	echo ""; \
 	echo "Done: $(DIST_DIR)/windows-$(WINDOWS_ARCH)/$(BINARY_NAME)$$EXT"; \
 	du -h $(DIST_DIR)/windows-$(WINDOWS_ARCH)/$(BINARY_NAME)$$EXT
+
+# ── Shared Library (.so) for FFI ──────────────
+build-so:
+	@echo "Building libdiceng.so (cdylib)...";
+	cargo build --release --lib;
+	mkdir -p $(DIST_DIR)/linux-x86_64;
+	cp target/release/libdiceng.so $(DIST_DIR)/linux-x86_64/;
+	strip $(DIST_DIR)/linux-x86_64/libdiceng.so;
+	echo ""; \
+	echo "Done: $(DIST_DIR)/linux-x86_64/libdiceng.so"; \
+	du -h $(DIST_DIR)/linux-x86_64/libdiceng.so
 
 # ── Build All ──────────────────────────────────
 build-all:
