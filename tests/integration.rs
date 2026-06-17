@@ -256,3 +256,66 @@ fn test_dice_pool_foundry_wild_die() {
         assert!(r.value() >= 1 && r.value() <= 8);
     }
 }
+
+#[test]
+fn test_shorthand_after_arithmetic_gives_clear_error() {
+    // "2d6+7ro1" — ro after a plain number should produce a parse error,
+    // not crash or produce a misleading "Unexpected token 'RerollOnce'" error.
+    let result = parse("2d6+7ro1");
+    assert!(!result.success(), "2d6+7ro1 should fail to parse");
+
+    let errors = result.errors();
+    assert!(
+        !errors.is_empty(),
+        "2d6+7ro1 should produce at least one error"
+    );
+    // The error should mention 'ro1' as an unexpected identifier, not 'RerollOnce'
+    let error_msg = &errors[0].message;
+    assert!(
+        error_msg.contains("ro1") || error_msg.contains("Ident"),
+        "Error should reference 'ro1' as an identifier, got: {}",
+        error_msg
+    );
+}
+
+#[test]
+fn test_reroll_once_with_addition_correct_order() {
+    // "2d6ro1+7" — correct order: reroll on dice, then add
+    let result = parse("2d6ro1+7");
+    assert!(result.success(), "2d6ro1+7 should parse successfully");
+
+    let expr = result.expression().unwrap();
+    for seed in 1..50 {
+        let r = roll_seeded(expr, seed);
+        // 2d6ro1: each die rerolls 1s once → min 2, max 12; +7 → [9, 19]
+        assert!(r.value() >= 9 && r.value() <= 19);
+    }
+}
+
+#[test]
+fn test_reroll_once_with_comp_op() {
+    // "3d6ro<3" — reroll dice ≤ 2 once (Great Weapon Fighting)
+    let result = parse("3d6ro<3");
+    assert!(result.success(), "3d6ro<3 should parse successfully");
+
+    let expr = result.expression().unwrap();
+    for seed in 1..100 {
+        let r = roll_seeded(expr, seed);
+        // Each die: if ≤ 2, reroll once → min 1 (reroll to 1), max 6
+        // 3 dice total: [3, 18]
+        assert!(r.value() >= 3 && r.value() <= 18);
+    }
+}
+
+#[test]
+fn test_reroll_once_with_ge() {
+    // "3d6ro>=5" — reroll dice ≥ 5 once
+    let result = parse("3d6ro>=5");
+    assert!(result.success(), "3d6ro>=5 should parse successfully");
+
+    let expr = result.expression().unwrap();
+    for seed in 1..50 {
+        let r = roll_seeded(expr, seed);
+        assert!(r.value() >= 3 && r.value() <= 18);
+    }
+}

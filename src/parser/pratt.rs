@@ -209,7 +209,7 @@ impl Parser {
                     }
                     ModifierShorthand::Reroll => {
                         self.advance();
-                        let (limit, condition) = self.parse_functor_args();
+                        let (limit, condition) = self.parse_reroll_args();
                         functors.push(Functor::Reroll { limit, condition });
                     }
                     ModifierShorthand::Compound => {
@@ -323,7 +323,7 @@ impl Parser {
                         }
                         "reroll" | "r" => {
                             self.advance();
-                            let (limit, condition) = self.parse_functor_args();
+                            let (limit, condition) = self.parse_reroll_args();
                             functors.push(Functor::Reroll { limit, condition });
                         }
                         "compound" | "ce" => {
@@ -427,8 +427,67 @@ impl Parser {
         (limit, condition)
     }
 
+    fn parse_reroll_args(&mut self) -> (FunctorLimit, TriggerCondition) {
+        let mut limit = FunctorLimit::Always;
+        let mut condition = None;
+
+        match self.current().kind.clone() {
+            TokenKind::Ident(ref s) => match s.as_str() {
+                "once" => {
+                    self.advance();
+                    limit = FunctorLimit::Once;
+                }
+                "twice" => {
+                    self.advance();
+                    limit = FunctorLimit::Twice;
+                }
+                "thrice" => {
+                    self.advance();
+                    limit = FunctorLimit::Thrice;
+                }
+                "always" => {
+                    self.advance();
+                }
+                _ => {}
+            },
+            TokenKind::Number(n) if n > 0 => {
+                self.advance();
+                if self.current().kind == TokenKind::Ident("times".into()) {
+                    self.advance();
+                    limit = FunctorLimit::Times(n as u32);
+                } else {
+                    condition = Some(TriggerCondition::Exact(n as u32));
+                }
+            }
+            _ => {}
+        }
+
+        if self.current().kind == TokenKind::Ident("on".into()) {
+            self.advance();
+        }
+
+        let condition = match condition {
+            Some(c) => c,
+            None => self.parse_trigger_condition(),
+        };
+
+        (limit, condition)
+    }
+
     fn parse_trigger_condition(&mut self) -> TriggerCondition {
         match self.current().kind.clone() {
+            TokenKind::CompOp(op) => {
+                self.advance();
+                let val = self.parse_number_literal() as u32;
+                match op {
+                    CountOp::Ge => TriggerCondition::AtOrAbove(val),
+                    CountOp::Gt => TriggerCondition::AtOrAbove(val + 1),
+                    CountOp::Le => TriggerCondition::AtOrBelow(val),
+                    CountOp::Lt => TriggerCondition::AtOrBelow(val.saturating_sub(1)),
+                    CountOp::Eq => TriggerCondition::Exact(val),
+                    CountOp::Ne => TriggerCondition::Exact(val),
+                }
+            }
             TokenKind::Number(n) => {
                 self.advance();
                 let val = n as u32;
@@ -990,9 +1049,66 @@ mod tests {
                 assert_eq!(d.functors.len(), 1);
                 match &d.functors[0] {
                     Functor::Reroll { limit, condition } => {
-                        // "r1" parses 1 as limit (Times(1)), default condition (Max)
-                        assert_eq!(*limit, FunctorLimit::Times(1));
-                        assert_eq!(*condition, TriggerCondition::Max);
+                        // "r1" parses 1 as trigger condition (Exact(1)), default limit (Always)
+                        assert_eq!(*limit, FunctorLimit::Always);
+                        assert_eq!(*condition, TriggerCondition::Exact(1));
+                    }
+                    _ => panic!("Expected Reroll functor"),
+                }
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_reroll_value_bare_number() {
+        let result = Parser::parse("3d6r4");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.functors.len(), 1);
+                match &d.functors[0] {
+                    Functor::Reroll { limit, condition } => {
+                        assert_eq!(*limit, FunctorLimit::Always);
+                        assert_eq!(*condition, TriggerCondition::Exact(4));
+                    }
+                    _ => panic!("Expected Reroll functor"),
+                }
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_reroll_with_times_limit() {
+        let result = Parser::parse("3d6r 2 times on 3");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.functors.len(), 1);
+                match &d.functors[0] {
+                    Functor::Reroll { limit, condition } => {
+                        assert_eq!(*limit, FunctorLimit::Times(2));
+                        assert_eq!(*condition, TriggerCondition::Exact(3));
+                    }
+                    _ => panic!("Expected Reroll functor"),
+                }
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_reroll_once_on_value() {
+        let result = Parser::parse("3d6r once on 3");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.functors.len(), 1);
+                match &d.functors[0] {
+                    Functor::Reroll { limit, condition } => {
+                        assert_eq!(*limit, FunctorLimit::Once);
+                        assert_eq!(*condition, TriggerCondition::Exact(3));
                     }
                     _ => panic!("Expected Reroll functor"),
                 }
@@ -1222,6 +1338,82 @@ mod tests {
                 match &d.functors[0] {
                     Functor::Reroll { condition, .. } => {
                         assert_eq!(*condition, TriggerCondition::Between(1, 2));
+                    }
+                    _ => panic!("Expected Reroll"),
+                }
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_trigger_lt() {
+        let result = Parser::parse("3d6ro<3");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.functors.len(), 1);
+                match &d.functors[0] {
+                    Functor::Reroll { limit, condition } => {
+                        assert_eq!(*limit, FunctorLimit::Once);
+                        assert_eq!(*condition, TriggerCondition::AtOrBelow(2));
+                    }
+                    _ => panic!("Expected Reroll"),
+                }
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_trigger_ge() {
+        let result = Parser::parse("3d6ro>=5");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.functors.len(), 1);
+                match &d.functors[0] {
+                    Functor::Reroll { limit, condition } => {
+                        assert_eq!(*limit, FunctorLimit::Once);
+                        assert_eq!(*condition, TriggerCondition::AtOrAbove(5));
+                    }
+                    _ => panic!("Expected Reroll"),
+                }
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_trigger_gt() {
+        let result = Parser::parse("3d6ro>5");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.functors.len(), 1);
+                match &d.functors[0] {
+                    Functor::Reroll { limit, condition } => {
+                        assert_eq!(*limit, FunctorLimit::Once);
+                        assert_eq!(*condition, TriggerCondition::AtOrAbove(6));
+                    }
+                    _ => panic!("Expected Reroll"),
+                }
+            }
+            _ => panic!("Expected Dice"),
+        }
+    }
+
+    #[test]
+    fn test_parse_trigger_le() {
+        let result = Parser::parse("3d6ro<=2");
+        assert!(result.success());
+        match result.expression().unwrap() {
+            Expression::Dice(d) => {
+                assert_eq!(d.functors.len(), 1);
+                match &d.functors[0] {
+                    Functor::Reroll { limit, condition } => {
+                        assert_eq!(*limit, FunctorLimit::Once);
+                        assert_eq!(*condition, TriggerCondition::AtOrBelow(2));
                     }
                     _ => panic!("Expected Reroll"),
                 }

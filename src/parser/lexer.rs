@@ -216,7 +216,7 @@ impl Lexer {
                 }
                 ']' => {
                     self.advance();
-                    self.prev_was_dice = false;
+                    self.prev_was_dice = true;
                     self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::RBrack,
@@ -238,7 +238,7 @@ impl Lexer {
                 }
                 '}' => {
                     self.advance();
-                    self.prev_was_dice = false;
+                    self.prev_was_dice = true;
                     self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::RBrace,
@@ -779,7 +779,7 @@ impl Lexer {
             let first_char = ident.chars().next().unwrap();
 
             // Check for two-letter shorthands FIRST: "ce" (compound)
-            if first_char == 'c' && ident.len() > 1 {
+            if first_char == 'c' && ident.len() > 1 && self.prev_was_dice {
                 let second_char = ident.chars().nth(1).unwrap();
                 if second_char == 'e' {
                     // "ce..." - compound shorthand
@@ -816,7 +816,7 @@ impl Lexer {
             }
 
             // Check for two-letter shorthands: kh, kl, dh, dl, mi, ma, ro, cs, sa, sd
-            if first_char == 'k' && ident.len() > 1 {
+            if first_char == 'k' && ident.len() > 1 && self.prev_was_dice {
                 let second_char = ident.chars().nth(1).unwrap();
                 if second_char == 'h' || second_char == 'l' {
                     let digit_len = ident[2..]
@@ -839,7 +839,7 @@ impl Lexer {
                     }
                 }
             }
-            if first_char == 'd' && ident.len() > 1 {
+            if first_char == 'd' && ident.len() > 1 && self.prev_was_dice {
                 let second_char = ident.chars().nth(1).unwrap();
                 if second_char == 'h' || second_char == 'l' {
                     let digit_len = ident[2..]
@@ -862,7 +862,7 @@ impl Lexer {
                     }
                 }
             }
-            if first_char == 'm' && ident.len() > 1 {
+            if first_char == 'm' && ident.len() > 1 && self.prev_was_dice {
                 let second_char = ident.chars().nth(1).unwrap();
                 if second_char == 'i' || second_char == 'a' {
                     let digit_len = ident[2..]
@@ -885,7 +885,7 @@ impl Lexer {
                     }
                 }
             }
-            if first_char == 'r' && ident.len() > 1 {
+            if first_char == 'r' && ident.len() > 1 && self.prev_was_dice {
                 let second_char = ident.chars().nth(1).unwrap();
                 if second_char == 'o' {
                     let digit_len = ident[2..]
@@ -903,7 +903,7 @@ impl Lexer {
                     }
                 }
             }
-            if first_char == 't' && ident.len() > 1 {
+            if first_char == 't' && ident.len() > 1 && self.prev_was_dice {
                 let second_char = ident.chars().nth(1).unwrap();
                 if second_char.is_ascii_digit() {
                     self.pos = start + 1;
@@ -915,7 +915,7 @@ impl Lexer {
                     });
                 }
             }
-            if first_char == 'c' && ident.len() > 1 {
+            if first_char == 'c' && ident.len() > 1 && self.prev_was_dice {
                 let second_char = ident.chars().nth(1).unwrap();
                 if second_char == 's' {
                     let digit_len = ident[2..]
@@ -941,7 +941,7 @@ impl Lexer {
                 .count();
 
             // If there are digits after the first char, and first char is a shorthand
-            if digit_prefix_len > 0 {
+            if digit_prefix_len > 0 && self.prev_was_dice {
                 let shorthand = match first_char {
                     'k' | 'K' => Some(ModifierShorthand::Keep),
                     'd' | 'D' => Some(ModifierShorthand::Drop),
@@ -1524,5 +1524,55 @@ mod tests {
                 faces: vec![-1, 0, 1]
             })
         );
+    }
+
+    #[test]
+    fn test_shorthand_after_number_not_dice_is_ident() {
+        // "7ro1" — ro should NOT be a shorthand when preceded by a plain number
+        let tokens = Lexer::new("7ro1").tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Number(7));
+        assert_eq!(tokens[1].kind, TokenKind::Ident("ro1".into()));
+        assert_eq!(tokens[2].kind, TokenKind::Eof);
+    }
+
+    #[test]
+    fn test_shorthand_after_arithmetic_not_dice() {
+        // "2d6+7ro1" — ro should NOT be a shorthand after "+7"
+        let tokens = Lexer::new("2d6+7ro1").tokenize().unwrap();
+        assert_eq!(
+            tokens[0].kind,
+            TokenKind::Dice(DiceToken::Standard { count: 2, sides: 6 })
+        );
+        assert_eq!(tokens[1].kind, TokenKind::Op(BinaryOp::Add));
+        assert_eq!(tokens[2].kind, TokenKind::Number(7));
+        assert_eq!(tokens[3].kind, TokenKind::Ident("ro1".into()));
+        assert_eq!(tokens[4].kind, TokenKind::Eof);
+    }
+
+    #[test]
+    fn test_reroll_shorthand_after_number_is_ident() {
+        // "7r2" — r should NOT be a shorthand when preceded by a plain number
+        let tokens = Lexer::new("7r2").tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Number(7));
+        assert_eq!(tokens[1].kind, TokenKind::Ident("r2".into()));
+        assert_eq!(tokens[2].kind, TokenKind::Eof);
+    }
+
+    #[test]
+    fn test_kh_shorthand_after_number_is_ident() {
+        // "7kh3" — kh should NOT be a shorthand when preceded by a plain number
+        let tokens = Lexer::new("7kh3").tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Number(7));
+        assert_eq!(tokens[1].kind, TokenKind::Ident("kh3".into()));
+        assert_eq!(tokens[2].kind, TokenKind::Eof);
+    }
+
+    #[test]
+    fn test_explode_shorthand_after_number_is_ident() {
+        // "7e2" — e should NOT be a shorthand when preceded by a plain number
+        let tokens = Lexer::new("7e2").tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Number(7));
+        assert_eq!(tokens[1].kind, TokenKind::Ident("e2".into()));
+        assert_eq!(tokens[2].kind, TokenKind::Eof);
     }
 }
