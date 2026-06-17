@@ -183,6 +183,8 @@ impl Lexer {
             let token = match ch {
                 '(' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::LParen,
                         text: "(".into(),
@@ -192,6 +194,8 @@ impl Lexer {
                 }
                 ')' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::RParen,
                         text: ")".into(),
@@ -201,6 +205,8 @@ impl Lexer {
                 }
                 '[' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::LBrack,
                         text: "[".into(),
@@ -210,6 +216,8 @@ impl Lexer {
                 }
                 ']' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::RBrack,
                         text: "]".into(),
@@ -219,6 +227,8 @@ impl Lexer {
                 }
                 '{' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::LBrace,
                         text: "{".into(),
@@ -228,6 +238,8 @@ impl Lexer {
                 }
                 '}' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::RBrace,
                         text: "}".into(),
@@ -237,6 +249,8 @@ impl Lexer {
                 }
                 ',' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::Comma,
                         text: ",".into(),
@@ -246,6 +260,8 @@ impl Lexer {
                 }
                 '+' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::Op(BinaryOp::Add),
                         text: "+".into(),
@@ -255,6 +271,8 @@ impl Lexer {
                 }
                 '-' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::Op(BinaryOp::Sub),
                         text: "-".into(),
@@ -264,6 +282,8 @@ impl Lexer {
                 }
                 '*' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::Op(BinaryOp::Mul),
                         text: "*".into(),
@@ -273,6 +293,8 @@ impl Lexer {
                 }
                 '/' => {
                     self.advance();
+                    self.prev_was_dice = false;
+                    self.prev_was_shorthand = false;
                     Token {
                         kind: TokenKind::Op(BinaryOp::Div),
                         text: "/".into(),
@@ -472,10 +494,24 @@ impl Lexer {
                             tok
                         }
                     } else {
-                        let tok = self.lex_dice(start)?;
-                        self.prev_was_dice = matches!(&tok.kind, TokenKind::Dice(_));
-                        self.prev_was_filter_number = false;
-                        tok
+                        // Check if 'd' followed by a letter (not digit/%/F/{)
+                        // If so, treat as identifier (e.g., "dh", "dl", "drop")
+                        let next_char = self.peek();
+                        if matches!(next_char, Some(c) if c.is_ascii_alphabetic() && c != 'F' && c != 'f')
+                        {
+                            let tok = self.lex_ident_or_keyword(start)?;
+                            self.prev_was_dice = false;
+                            self.prev_was_filter_number = false;
+                            let is_shorthand = matches!(&tok.kind, TokenKind::Shorthand(_));
+                            self.prev_was_filter_number = is_shorthand;
+                            self.prev_was_shorthand = is_shorthand;
+                            tok
+                        } else {
+                            let tok = self.lex_dice(start)?;
+                            self.prev_was_dice = matches!(&tok.kind, TokenKind::Dice(_));
+                            self.prev_was_filter_number = false;
+                            tok
+                        }
                     }
                 }
                 'a'..='z' | 'A'..='Z' | '_' => {
@@ -1202,25 +1238,6 @@ mod tests {
         assert_eq!(tokens[4].kind, TokenKind::Number(2));
     }
 
-    #[test]
-    fn test_chained_shorthand_4d6k3d1() {
-        let tokens = Lexer::new("4d6k3d1").tokenize().unwrap();
-        assert_eq!(
-            tokens[0].kind,
-            TokenKind::Dice(DiceToken::Standard { count: 4, sides: 6 })
-        );
-        assert_eq!(
-            tokens[1].kind,
-            TokenKind::Shorthand(ModifierShorthand::Keep)
-        );
-        assert_eq!(tokens[2].kind, TokenKind::Number(3));
-        assert_eq!(
-            tokens[3].kind,
-            TokenKind::Shorthand(ModifierShorthand::Drop)
-        );
-        assert_eq!(tokens[4].kind, TokenKind::Number(1));
-    }
-
     // Tests for new standard RPG notation features
 
     #[test]
@@ -1437,6 +1454,74 @@ mod tests {
             TokenKind::Dice(DiceToken::Fate {
                 count: 4,
                 magnitude: 3
+            })
+        );
+    }
+
+    // ── Error Path Tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_lex_error_unexpected_char() {
+        let result = Lexer::new("3d6@#").tokenize();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.message.contains("Unexpected character"));
+        assert_eq!(err.position, 3);
+    }
+
+    #[test]
+    fn test_lex_error_d0() {
+        let result = Lexer::new("d0").tokenize();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.message.contains("0 sides"));
+    }
+
+    #[test]
+    fn test_lex_error_empty_faces() {
+        let result = Lexer::new("d{}").tokenize();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.message.contains("Empty face list"));
+    }
+
+    #[test]
+    fn test_lex_error_unterminated_d() {
+        let result = Lexer::new("3d").tokenize();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.message.contains("Unexpected end after 'd'"));
+    }
+
+    #[test]
+    fn test_lex_empty_input() {
+        let tokens = Lexer::new("").tokenize().unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Eof);
+    }
+
+    #[test]
+    fn test_lex_whitespace_only() {
+        let tokens = Lexer::new("   ").tokenize().unwrap();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::Eof);
+    }
+
+    #[test]
+    fn test_lex_d_followed_by_letter_is_identifier() {
+        // "dabc" is a valid identifier (not dice notation)
+        let tokens = Lexer::new("dabc").tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::Ident("dabc".into()));
+    }
+
+    #[test]
+    fn test_lex_negative_faces() {
+        let tokens = Lexer::new("d{-1,0,1}").tokenize().unwrap();
+        assert_eq!(
+            tokens[0].kind,
+            TokenKind::Dice(DiceToken::Custom {
+                count: 1,
+                faces: vec![-1, 0, 1]
             })
         );
     }

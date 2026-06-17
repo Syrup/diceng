@@ -151,3 +151,36 @@ pub struct CountThreshold {
 pub struct MultiCountThreshold {
     pub thresholds: Vec<CountThreshold>,
 }
+
+/// Modifier for Foundry VTT-style dice pools (`{expr, expr}modifier`).
+///
+/// Pool modifiers operate at the **group level** (not per-die).
+/// Default `n` for keep/drop is 1 (Foundry convention).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PoolModifier {
+    /// Sum all group results (default when no modifier specified)
+    Sum,
+    /// Keep N highest group results, then sum
+    KeepHighest(u32),
+    /// Keep N lowest group results, then sum
+    KeepLowest(u32),
+    /// Drop N highest group results, then sum remaining
+    DropHighest(u32),
+    /// Drop N lowest group results, then sum remaining
+    DropLowest(u32),
+    /// Count group results meeting a threshold
+    CountSuccess(MultiCountThreshold),
+}
+
+impl fmt::Display for PoolModifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PoolModifier::Sum => write!(f, "sum"),
+            PoolModifier::KeepHighest(n) => write!(f, "kh{}", n),
+            PoolModifier::KeepLowest(n) => write!(f, "kl{}", n),
+            PoolModifier::DropHighest(n) => write!(f, "dh{}", n),
+            PoolModifier::DropLowest(n) => write!(f, "dl{}", n),
+            PoolModifier::CountSuccess(_) => write!(f, "cs"),
+        }
+    }
+}
