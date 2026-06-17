@@ -1,11 +1,11 @@
 # diceng
 
-![Rust](https://shieldcn.dev/badge/Rust-2021%20Edition.svg?size=default&theme=zinc&font=jetbrains-mono&logo=rust)
-![License](https://shieldcn.dev/github/Syrup/diceng/license.svg?variant=branded&size=default&theme=zinc&font=jetbrains-mono)
-![Version](https://shieldcn.dev/github/Syrup/diceng/release.svg?variant=branded&size=default&theme=zinc&font=jetbrains-mono)
-![CI](https://shieldcn.dev/github/Syrup/diceng/ci.svg?size=default&theme=zinc&font=jetbrains-mono)
-![Platform](https://shieldcn.dev/badge/platform-Linux%20|%20MacOS%20|%20Android.svg?size=default&theme=zinc&font=jetbrains-mono&logo=lu%3AComputer)
-![GitHub Stars](https://www.shieldcn.dev/github/stars/Syrup/diceng.svg?variant=branded&mode=dark&theme=zinc&font=jetbrains-mono)
+![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
+![License](https://img.shields.io/badge/license-MIT-blue)
+![Version](https://img.shields.io/badge/version-1.0.0-green)
+![CI](https://github.com/Syrup/diceng/actions/workflows/ci.yml/badge.svg)
+![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows%20%7C%20android-lightgrey)
+![GitHub Stars](https://img.shields.io/github/stars/Syrup/diceng?style=social)
 
 > A dice expression parser and roller, with probability analysis thrown in.
 
