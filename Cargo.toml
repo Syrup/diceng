@@ -1,6 +1,6 @@
 [package]
 name = "diceng"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 description = "Fast dice expression parser, roller, and probability analyzer"
 license = "MIT"
