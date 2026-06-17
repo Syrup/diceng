@@ -1,0 +1,19 @@
+[workspace]
+# Only release when a Release PR is merged, not on every push to main
+release_always = false
+
+# Run cargo-semver-checks to detect API breaking changes
+semver_check = true
+
+# Don't create GitHub Releases from release-plz — release.yml handles that
+# with cross-compiled binaries for 12 targets
+git_release_enable = false
+
+# Create git tags (e.g., v1.0.2) to trigger release.yml
+git_tag_enable = true
+
+# Generate CHANGELOG.md automatically
+changelog_update = true
+
+# Add label to Release PRs for easy filtering
+pr_labels = ["release"]

@@ -2,7 +2,7 @@
 
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Version](https://img.shields.io/badge/version-1.0.1-green)
+![Version](https://img.shields.io/crates/v/diceng.svg)
 ![CI](https://github.com/Syrup/diceng/actions/workflows/ci.yml/badge.svg)
 ![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows%20%7C%20android-lightgrey)
 ![GitHub Stars](https://img.shields.io/github/stars/Syrup/diceng?style=social)
@@ -381,8 +381,9 @@ make build PLATFORM=android
 
 1. Fork the repository
 2. Create a feature branch
-3. Run `make check` (fmt + clippy + test)
-4. Submit a pull request
+3. Use [conventional commits](https://www.conventionalcommits.org/) for your changes
+4. Run `make check` (fmt + clippy + test)
+5. Submit a pull request
 
 ```bash
 make check
@@ -392,6 +393,35 @@ make check
 # 78 tests passed
 ```
 
+### Commit message format
+
+This project uses [conventional commits](https://www.conventionalcommits.org/) for automatic versioning and changelog generation:
+
+```
+feat: add new feature              → minor version bump
+fix(parser): fix parsing bug       → patch version bump
+feat!: redesign API                → major version bump (breaking change)
+docs: update README                → patch version bump
+chore: update dependencies         → patch version bump
+```
+
+## Release Process
+
+Releases are automated with [release-plz](https://release-plz.dev/):
+
+1. Push commits to `main` using conventional commit messages
+2. release-plz creates a **Release PR** with version bump + CHANGELOG update
+3. Maintainer reviews and merges the Release PR
+4. release-plz publishes to [crates.io](https://crates.io/crates/diceng) and creates a git tag
+5. The tag triggers cross-compilation builds for 12 targets (Linux, macOS, Windows, Android)
+6. A GitHub Release is created with pre-built binaries
+
+No manual version bumping or tag creation needed.
+
 ## License
 
 MIT. See [LICENSE](LICENSE) for details.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release history.
