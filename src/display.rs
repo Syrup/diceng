@@ -20,6 +20,12 @@ pub enum DieEntryKind {
     Emphasis,
     /// Counted: threshold match
     Counted,
+    /// Separator: arithmetic operator between groups
+    Separator,
+    /// Literal: plain number (not a dice roll)
+    Literal,
+    /// Pool group: a sub-expression in a Foundry VTT dice pool
+    PoolGroup,
 }
 
 /// Entry for a single die in verbose display
@@ -64,19 +70,27 @@ pub fn render_verbose(expression: &str, result: i32, dice: &[DieEntry]) -> Strin
 
     // Summary
     if is_counted {
-        // For counted results, show count instead of sum
-        let count = dice.iter().filter(|d| d.kept).count();
-        let total = dice.len();
+        // For counted results, show the actual count from the expression
+        let total = dice
+            .iter()
+            .filter(|d| d.kind != Some(DieEntryKind::Separator))
+            .count();
         out.push_str(&format!(
             "{} {} (from {} dice)",
             "Count:".green().bold(),
-            count.to_string().bold(),
+            result.to_string().bold(),
             total
         ));
         out.push('\n');
     } else {
-        let kept: Vec<_> = dice.iter().filter(|d| d.kept).collect();
-        let dropped: Vec<_> = dice.iter().filter(|d| !d.kept).collect();
+        let kept: Vec<_> = dice
+            .iter()
+            .filter(|d| d.kept && d.kind != Some(DieEntryKind::Separator))
+            .collect();
+        let dropped: Vec<_> = dice
+            .iter()
+            .filter(|d| !d.kept && d.kind != Some(DieEntryKind::Separator))
+            .collect();
 
         if !kept.is_empty() {
             let vals: Vec<String> = kept.iter().map(|d| d.value.to_string()).collect();
@@ -106,9 +120,15 @@ pub fn render_verbose(expression: &str, result: i32, dice: &[DieEntry]) -> Strin
 }
 
 fn format_die_entry(die: &DieEntry) -> String {
-    // If this entry has an operator (from arithmetic literal), show it specially
-    if let Some(ref op) = die.operator {
-        return format!("[{}{}]", op, die.value).cyan().to_string();
+    // Separator: show operator with spaces
+    if die.kind == Some(DieEntryKind::Separator) {
+        let op = die.operator.as_deref().unwrap_or("");
+        return format!(" {} ", op).cyan().to_string();
+    }
+
+    // Literal: show plain number without brackets or checkmark
+    if die.kind == Some(DieEntryKind::Literal) {
+        return format!("{}", die.value).cyan().to_string();
     }
 
     if let Some(ref chain) = die.chain {
@@ -286,5 +306,79 @@ mod tests {
         let output = render_verbose("3d6cs>=5", 2, &dice);
         assert!(output.contains("Count:"));
         assert!(output.contains("2"));
+    }
+
+    // ── Coverage Gap Tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_render_verbose_literal() {
+        let dice = vec![DieEntry {
+            value: 42,
+            kept: true,
+            chain: None,
+            operator: None,
+            kind: Some(DieEntryKind::Literal),
+        }];
+        let output = render_verbose("42", 42, &dice);
+        assert!(output.contains("42"));
+        assert!(output.contains("Kept:"));
+    }
+
+    #[test]
+    fn test_render_verbose_separator() {
+        let dice = vec![
+            DieEntry {
+                value: 6,
+                kept: true,
+                chain: None,
+                operator: None,
+                kind: None,
+            },
+            DieEntry {
+                value: 0,
+                kept: false,
+                chain: None,
+                operator: Some("+".to_string()),
+                kind: Some(DieEntryKind::Separator),
+            },
+            DieEntry {
+                value: 4,
+                kept: true,
+                chain: None,
+                operator: None,
+                kind: Some(DieEntryKind::Literal),
+            },
+        ];
+        let output = render_verbose("d6 + 4", 10, &dice);
+        assert!(output.contains("+"));
+        assert!(output.contains("10"));
+    }
+
+    #[test]
+    fn test_render_verbose_reroll_chain() {
+        let dice = vec![DieEntry {
+            value: 4,
+            kept: true,
+            chain: Some(vec![1, 2, 4]),
+            operator: None,
+            kind: Some(DieEntryKind::Reroll),
+        }];
+        let output = render_verbose("d6 reroll on 1", 4, &dice);
+        assert!(output.contains("→"));
+        assert!(output.contains("Kept:"));
+    }
+
+    #[test]
+    fn test_render_verbose_min_cap_chain() {
+        let dice = vec![DieEntry {
+            value: 3,
+            kept: true,
+            chain: Some(vec![1, 3]),
+            operator: None,
+            kind: Some(DieEntryKind::MinCap),
+        }];
+        let output = render_verbose("d6mi3", 3, &dice);
+        assert!(output.contains("→"));
+        assert!(output.contains("Kept:"));
     }
 }

@@ -158,4 +158,9 @@ pub enum Expression {
     },
     /// Negation: `-d6 + 10`
     UnaryMinus(Box<Expression>),
+    /// Foundry VTT-style dice pool: `{4d6, 3d8, 2d10}kh`
+    DicePool {
+        exprs: Vec<Expression>,
+        pool_modifier: PoolModifier,
+    },
 }

@@ -55,6 +55,13 @@ pub enum RollResult {
     },
     /// Count result (dice pool counting)
     Counted { pool: Box<RollResult>, count: u32 },
+    /// Foundry VTT-style dice pool result
+    PoolResult {
+        group_results: Vec<RollResult>,
+        kept: Vec<RollResult>,
+        dropped: Vec<RollResult>,
+        value: i32,
+    },
 }
 
 /// Kind of functor for RollResult
@@ -84,6 +91,7 @@ impl RollResult {
             RollResult::Filtered { value, .. } => *value,
             RollResult::Functor { value, .. } => *value,
             RollResult::Counted { count, .. } => *count as i32,
+            RollResult::PoolResult { value, .. } => *value,
         }
     }
 
@@ -117,6 +125,11 @@ impl RollResult {
             } => {
                 original.collect_dice_values(values);
                 for r in extra_rolls {
+                    r.collect_dice_values(values);
+                }
+            }
+            RollResult::PoolResult { kept, .. } => {
+                for r in kept {
                     r.collect_dice_values(values);
                 }
             }
@@ -212,7 +225,7 @@ impl RollResult {
                     kept: true,
                     chain: None,
                     operator: None,
-                    kind: None,
+                    kind: Some(DieEntryKind::Literal),
                 }]
             }
             RollResult::Die { value, .. } => {
@@ -229,20 +242,24 @@ impl RollResult {
             } => {
                 // Recursively extract dice entries from both operands
                 let mut entries = left.to_verbose_entries();
-                // Tag right operand entries with the operator
+
+                // Add separator
                 let op_str = match op {
                     BinaryOp::Add => "+",
                     BinaryOp::Sub => "-",
                     BinaryOp::Mul => "*",
                     BinaryOp::Div => "/",
                 };
-                let mut right_entries = right.to_verbose_entries();
-                for entry in &mut right_entries {
-                    if entry.operator.is_none() {
-                        entry.operator = Some(op_str.to_string());
-                    }
-                }
-                entries.extend(right_entries);
+                entries.push(DieEntry {
+                    value: 0,
+                    kept: false, // not a die, exclude from Kept/Drop summary
+                    chain: None,
+                    operator: Some(op_str.to_string()),
+                    kind: Some(DieEntryKind::Separator),
+                });
+
+                // Add right entries without operator prefix
+                entries.extend(right.to_verbose_entries());
                 entries
             }
             RollResult::UnaryMinus { inner, .. } => inner.to_verbose_entries(),
@@ -260,6 +277,32 @@ impl RollResult {
                     entry.kind = Some(DieEntryKind::Counted);
                 }
                 entries
+            }
+            RollResult::PoolResult {
+                group_results,
+                kept,
+                ..
+            } => {
+                let kept_set: std::collections::HashSet<usize> = (0..group_results.len())
+                    .filter(|&i| {
+                        let g_val = group_results[i].value();
+                        let g_len = group_results[i].dice_values().len();
+                        kept.iter()
+                            .any(|k| k.value() == g_val && k.dice_values().len() == g_len)
+                    })
+                    .collect();
+
+                group_results
+                    .iter()
+                    .enumerate()
+                    .map(|(i, r)| DieEntry {
+                        value: r.value(),
+                        kept: kept_set.contains(&i),
+                        chain: None,
+                        operator: None,
+                        kind: Some(DieEntryKind::PoolGroup),
+                    })
+                    .collect()
             }
         }
     }
@@ -363,6 +406,10 @@ impl<R: DiceRng> Roller<R> {
             Expression::Literal(n) => RollResult::Literal { value: *n },
             Expression::Dice(dice_expr) => self.roll_dice(dice_expr),
             Expression::DiceSet { exprs, reducer } => self.roll_dice_set(exprs, *reducer),
+            Expression::DicePool {
+                exprs,
+                pool_modifier,
+            } => self.roll_dice_pool(exprs, pool_modifier),
             Expression::BinaryOp { op, left, right } => self.roll_binary_op(*op, left, right),
             Expression::UnaryMinus(inner) => self.roll_unary_minus(inner),
         }
@@ -892,6 +939,194 @@ impl<R: DiceRng> Roller<R> {
         }
     }
 
+    fn roll_dice_pool(&mut self, exprs: &[Expression], modifier: &PoolModifier) -> RollResult {
+        let group_results: Vec<RollResult> = exprs.iter().map(|e| self.roll(e)).collect();
+
+        if group_results.is_empty() {
+            return RollResult::PoolResult {
+                group_results: vec![],
+                kept: vec![],
+                dropped: vec![],
+                value: 0,
+            };
+        }
+
+        match modifier {
+            PoolModifier::Sum => {
+                let value: i32 = group_results.iter().map(|r| r.value()).sum();
+                let kept = group_results.clone();
+                RollResult::PoolResult {
+                    group_results,
+                    kept,
+                    dropped: vec![],
+                    value,
+                }
+            }
+            PoolModifier::KeepHighest(n) => {
+                let n = *n as usize;
+                let mut indexed: Vec<(usize, i32)> = group_results
+                    .iter()
+                    .enumerate()
+                    .map(|(i, r)| (i, r.value()))
+                    .collect();
+                indexed.sort_by_key(|&(_, v)| v);
+
+                let drop_count = group_results.len().saturating_sub(n);
+                let dropped_idx: std::collections::HashSet<usize> =
+                    indexed[..drop_count].iter().map(|&(i, _)| i).collect();
+
+                let kept: Vec<_> = group_results
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| !dropped_idx.contains(i))
+                    .map(|(_, r)| r.clone())
+                    .collect();
+                let dropped: Vec<_> = group_results
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| dropped_idx.contains(i))
+                    .map(|(_, r)| r.clone())
+                    .collect();
+
+                let value: i32 = kept.iter().map(|r| r.value()).sum();
+                RollResult::PoolResult {
+                    group_results,
+                    kept,
+                    dropped,
+                    value,
+                }
+            }
+            PoolModifier::KeepLowest(n) => {
+                let n = *n as usize;
+                let mut indexed: Vec<(usize, i32)> = group_results
+                    .iter()
+                    .enumerate()
+                    .map(|(i, r)| (i, r.value()))
+                    .collect();
+                indexed.sort_by_key(|&(_, v)| std::cmp::Reverse(v));
+
+                let drop_count = group_results.len().saturating_sub(n);
+                let dropped_idx: std::collections::HashSet<usize> =
+                    indexed[..drop_count].iter().map(|&(i, _)| i).collect();
+
+                let kept: Vec<_> = group_results
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| !dropped_idx.contains(i))
+                    .map(|(_, r)| r.clone())
+                    .collect();
+                let dropped: Vec<_> = group_results
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| dropped_idx.contains(i))
+                    .map(|(_, r)| r.clone())
+                    .collect();
+
+                let value: i32 = kept.iter().map(|r| r.value()).sum();
+                RollResult::PoolResult {
+                    group_results,
+                    kept,
+                    dropped,
+                    value,
+                }
+            }
+            PoolModifier::DropHighest(n) => {
+                let n = *n as usize;
+                let mut indexed: Vec<(usize, i32)> = group_results
+                    .iter()
+                    .enumerate()
+                    .map(|(i, r)| (i, r.value()))
+                    .collect();
+                indexed.sort_by_key(|&(_, v)| v);
+
+                let drop_count = n.min(group_results.len());
+                let dropped_idx: std::collections::HashSet<usize> = indexed
+                    [group_results.len() - drop_count..]
+                    .iter()
+                    .map(|&(i, _)| i)
+                    .collect();
+
+                let kept: Vec<_> = group_results
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| !dropped_idx.contains(i))
+                    .map(|(_, r)| r.clone())
+                    .collect();
+                let dropped: Vec<_> = group_results
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| dropped_idx.contains(i))
+                    .map(|(_, r)| r.clone())
+                    .collect();
+
+                let value: i32 = kept.iter().map(|r| r.value()).sum();
+                RollResult::PoolResult {
+                    group_results,
+                    kept,
+                    dropped,
+                    value,
+                }
+            }
+            PoolModifier::DropLowest(n) => {
+                let n = *n as usize;
+                let mut indexed: Vec<(usize, i32)> = group_results
+                    .iter()
+                    .enumerate()
+                    .map(|(i, r)| (i, r.value()))
+                    .collect();
+                indexed.sort_by_key(|&(_, v)| v);
+
+                let drop_count = n.min(group_results.len());
+                let dropped_idx: std::collections::HashSet<usize> =
+                    indexed[..drop_count].iter().map(|&(i, _)| i).collect();
+
+                let kept: Vec<_> = group_results
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| !dropped_idx.contains(i))
+                    .map(|(_, r)| r.clone())
+                    .collect();
+                let dropped: Vec<_> = group_results
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| dropped_idx.contains(i))
+                    .map(|(_, r)| r.clone())
+                    .collect();
+
+                let value: i32 = kept.iter().map(|r| r.value()).sum();
+                RollResult::PoolResult {
+                    group_results,
+                    kept,
+                    dropped,
+                    value,
+                }
+            }
+            PoolModifier::CountSuccess(threshold) => {
+                let count = group_results
+                    .iter()
+                    .filter(|r| {
+                        let val = r.value() as u32;
+                        threshold.thresholds.iter().any(|t| match t.op {
+                            CountOp::Eq => val == t.value,
+                            CountOp::Ne => val != t.value,
+                            CountOp::Lt => val < t.value,
+                            CountOp::Le => val <= t.value,
+                            CountOp::Gt => val > t.value,
+                            CountOp::Ge => val >= t.value,
+                        })
+                    })
+                    .count();
+                let kept = group_results.clone();
+                RollResult::PoolResult {
+                    group_results,
+                    kept,
+                    dropped: vec![],
+                    value: count as i32,
+                }
+            }
+        }
+    }
+
     fn roll_binary_op(
         &mut self,
         op: BinaryOp,
@@ -989,5 +1224,478 @@ mod tests {
         let expr = Parser::parse("4d6 keep 3").expression().unwrap().clone();
         let result = roller.roll(&expr);
         assert!(result.value() >= 3 && result.value() <= 18);
+    }
+
+    // ── Roller Coverage Tests (Deterministic) ─────────────────────────
+
+    #[test]
+    fn test_roll_explode_deterministic() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("3d6!").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        // Explode can exceed normal max of 18
+        assert!(result.value() >= 3, "3d6! should be >= 3");
+        // Not all rolls explode, so just verify the value is valid
+        assert!(result.value() >= 3);
+    }
+
+    #[test]
+    fn test_roll_explode_can_exceed_max() {
+        let expr = Parser::parse("d6!").expression().unwrap().clone();
+        // Try multiple seeds to find one that explodes
+        // LehmerRng needs seeds near M to produce 6 (max) on first roll
+        let mut found_explode = false;
+        for seed in 1789569700u32..1789569710 {
+            let mut roller = Roller::new(LehmerRng::new(seed));
+            let result = roller.roll(&expr);
+            if result.value() > 6 {
+                found_explode = true;
+                break;
+            }
+        }
+        assert!(
+            found_explode,
+            "d6! should sometimes exceed 6 due to explosions"
+        );
+    }
+
+    #[test]
+    fn test_roll_compound_deterministic() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("3d6!!").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        assert!(result.value() >= 3, "3d6!! should be >= 3");
+    }
+
+    #[test]
+    fn test_roll_reroll_deterministic() {
+        let expr = Parser::parse("3d6 reroll on 1")
+            .expression()
+            .unwrap()
+            .clone();
+        // With reroll on 1, no die should show 1 in the final result
+        // (though chain may contain 1s as discarded rolls)
+        for seed in 1..50 {
+            let mut roller = Roller::new(LehmerRng::new(seed));
+            let result = roller.roll(&expr);
+            assert!(result.value() >= 3, "3d6 reroll on 1 should be >= 3");
+        }
+    }
+
+    #[test]
+    fn test_roll_reroll_once_deterministic() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("2d6ro1").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        assert!(result.value() >= 2 && result.value() <= 12);
+    }
+
+    #[test]
+    fn test_roll_min_cap_deterministic() {
+        let expr = Parser::parse("4d6mi3").expression().unwrap().clone();
+        for seed in 1..50 {
+            let mut roller = Roller::new(LehmerRng::new(seed));
+            let result = roller.roll(&expr);
+            // Each die is at least 3, so sum >= 12
+            assert!(
+                result.value() >= 12,
+                "4d6mi3 should be >= 12, got {} with seed {}",
+                result.value(),
+                seed
+            );
+        }
+    }
+
+    #[test]
+    fn test_roll_max_cap_deterministic() {
+        let expr = Parser::parse("4d6ma4").expression().unwrap().clone();
+        for seed in 1..50 {
+            let mut roller = Roller::new(LehmerRng::new(seed));
+            let result = roller.roll(&expr);
+            // Each die is at most 4, so sum <= 16
+            assert!(
+                result.value() <= 16,
+                "4d6ma4 should be <= 16, got {} with seed {}",
+                result.value(),
+                seed
+            );
+        }
+    }
+
+    #[test]
+    fn test_roll_drop_deterministic() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("4d6 drop 1").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        assert!(result.value() >= 3 && result.value() <= 18);
+        // Verify it's a Filtered result
+        match &result {
+            RollResult::Filtered { kept, dropped, .. } => {
+                assert_eq!(kept.len(), 3);
+                assert_eq!(dropped.len(), 1);
+            }
+            _ => panic!("Expected Filtered result for 4d6 drop 1"),
+        }
+    }
+
+    #[test]
+    fn test_roll_keep_middle_deterministic() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("5d6 keep middle 3")
+            .expression()
+            .unwrap()
+            .clone();
+        let result = roller.roll(&expr);
+        assert!(result.value() >= 3 && result.value() <= 18);
+    }
+
+    #[test]
+    fn test_roll_count_success_deterministic() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("4d6cs>=4").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        assert!(result.value() >= 0 && result.value() <= 4);
+        match &result {
+            RollResult::Counted { count, .. } => {
+                assert!(*count <= 4);
+            }
+            _ => panic!("Expected Counted result for 4d6cs>=4"),
+        }
+    }
+
+    #[test]
+    fn test_roll_target_deterministic() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("4d6t4").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        assert!(result.value() >= 0 && result.value() <= 4);
+    }
+
+    #[test]
+    fn test_roll_dice_set_sum() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("(2d6, 3d6) sum")
+            .expression()
+            .unwrap()
+            .clone();
+        let result = roller.roll(&expr);
+        // 2d6: [2,12], 3d6: [3,18], sum: [5,30]
+        assert!(result.value() >= 5 && result.value() <= 30);
+        match &result {
+            RollResult::DiceSet { reducer, .. } => {
+                assert_eq!(*reducer, Reducer::Sum);
+            }
+            _ => panic!("Expected DiceSet result"),
+        }
+    }
+
+    #[test]
+    fn test_roll_dice_set_max() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("[d6, d8] max").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        assert!(result.value() >= 1 && result.value() <= 8);
+    }
+
+    #[test]
+    fn test_roll_unary_minus() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("-d6 + 10").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        // -d6: [-6, -1], + 10: [4, 9]
+        assert!(result.value() >= 4 && result.value() <= 9);
+        match &result {
+            RollResult::BinaryOp { op, .. } => {
+                assert_eq!(*op, BinaryOp::Add);
+            }
+            _ => panic!("Expected BinaryOp result"),
+        }
+    }
+
+    #[test]
+    fn test_roll_division_by_zero() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("3d6 / 0").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        // Division by zero returns 0
+        assert_eq!(result.value(), 0);
+    }
+
+    #[test]
+    fn test_roll_max_dice_count_overflow() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        // Exceed MAX_DICE_COUNT (10000)
+        let expr = Parser::parse("99999d6").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        // Returns Literal 0 for overflow
+        assert_eq!(result.value(), 0);
+    }
+
+    #[test]
+    fn test_roll_dice_values() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("3d6").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        let values = result.dice_values();
+        assert_eq!(values.len(), 3);
+        for v in &values {
+            assert!(*v >= 1 && *v <= 6);
+        }
+    }
+
+    #[test]
+    fn test_roll_to_verbose_entries() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("4d6 keep 3").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        let entries = result.to_verbose_entries();
+        // 4d6k3: 3 kept + 1 dropped = 4 entries
+        assert_eq!(entries.len(), 4);
+        let kept_count = entries.iter().filter(|e| e.kept).count();
+        let dropped_count = entries.iter().filter(|e| !e.kept).count();
+        assert_eq!(kept_count, 3);
+        assert_eq!(dropped_count, 1);
+    }
+
+    #[test]
+    fn test_roll_to_verbose_entries_literal() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("42").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        let entries = result.to_verbose_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].value, 42);
+        assert!(entries[0].kept);
+    }
+
+    #[test]
+    fn test_roll_to_verbose_entries_binary_op() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("2d6 + 4").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        let entries = result.to_verbose_entries();
+        // 2 dice + 1 separator + 1 literal = 4 entries
+        assert_eq!(entries.len(), 4);
+        // One entry should be a separator
+        let separators: Vec<_> = entries.iter().filter(|e| e.operator.is_some()).collect();
+        assert_eq!(separators.len(), 1);
+        assert_eq!(separators[0].operator.as_deref().unwrap(), "+");
+    }
+
+    #[test]
+    fn test_functor_limit_max_count() {
+        assert_eq!(FunctorLimit::Always.max_count(), 100);
+        assert_eq!(FunctorLimit::Once.max_count(), 1);
+        assert_eq!(FunctorLimit::Twice.max_count(), 2);
+        assert_eq!(FunctorLimit::Thrice.max_count(), 3);
+        assert_eq!(FunctorLimit::Times(5).max_count(), 5);
+    }
+
+    #[test]
+    fn test_roll_sort_ascending() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("4d6sa").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        // Just verify it produces a valid result
+        assert!(result.value() >= 4 && result.value() <= 24);
+    }
+
+    #[test]
+    fn test_roll_explode_with_condition() {
+        let expr = Parser::parse("d6!>=5").expression().unwrap().clone();
+        // With explode on >=5, the die explodes when showing 5 or 6
+        for seed in 1..100 {
+            let mut roller = Roller::new(LehmerRng::new(seed));
+            let result = roller.roll(&expr);
+            assert!(result.value() >= 1, "d6!>=5 should be >= 1");
+        }
+    }
+
+    #[test]
+    fn test_roll_emphasis_deterministic() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("d6 emphasis").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        // Emphasis picks the die furthest from center (3.5 for d6)
+        assert!(result.value() >= 1 && result.value() <= 6);
+    }
+
+    // ── Dice Pool Tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_roll_pool_sum() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("{4d6, 3d8}").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        // 4d6: [4,24], 3d8: [3,24], sum: [7,48]
+        assert!(result.value() >= 7 && result.value() <= 48);
+        match &result {
+            RollResult::PoolResult {
+                group_results,
+                kept,
+                dropped,
+                ..
+            } => {
+                assert_eq!(group_results.len(), 2);
+                assert_eq!(kept.len(), 2);
+                assert_eq!(dropped.len(), 0);
+            }
+            _ => panic!("Expected PoolResult"),
+        }
+    }
+
+    #[test]
+    fn test_roll_pool_keep_highest() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("{4d6, 3d8, 2d10}kh")
+            .expression()
+            .unwrap()
+            .clone();
+        let result = roller.roll(&expr);
+        // Should keep only the highest group result
+        assert!(result.value() >= 1);
+        match &result {
+            RollResult::PoolResult { kept, dropped, .. } => {
+                assert_eq!(kept.len(), 1);
+                assert_eq!(dropped.len(), 2);
+            }
+            _ => panic!("Expected PoolResult"),
+        }
+    }
+
+    #[test]
+    fn test_roll_pool_keep_lowest() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("{4d6, 3d8, 2d10}kl")
+            .expression()
+            .unwrap()
+            .clone();
+        let result = roller.roll(&expr);
+        assert!(result.value() >= 1);
+        match &result {
+            RollResult::PoolResult { kept, dropped, .. } => {
+                assert_eq!(kept.len(), 1);
+                assert_eq!(dropped.len(), 2);
+            }
+            _ => panic!("Expected PoolResult"),
+        }
+    }
+
+    #[test]
+    fn test_roll_pool_keep_highest_2() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("{4d6, 3d8, 2d10}kh2")
+            .expression()
+            .unwrap()
+            .clone();
+        let result = roller.roll(&expr);
+        assert!(result.value() >= 2);
+        match &result {
+            RollResult::PoolResult { kept, dropped, .. } => {
+                assert_eq!(kept.len(), 2);
+                assert_eq!(dropped.len(), 1);
+            }
+            _ => panic!("Expected PoolResult"),
+        }
+    }
+
+    #[test]
+    fn test_roll_pool_drop_highest() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("{4d6, 3d8, 2d10}dh1")
+            .expression()
+            .unwrap()
+            .clone();
+        let result = roller.roll(&expr);
+        assert!(result.value() >= 2);
+        match &result {
+            RollResult::PoolResult { kept, dropped, .. } => {
+                assert_eq!(kept.len(), 2);
+                assert_eq!(dropped.len(), 1);
+            }
+            _ => panic!("Expected PoolResult"),
+        }
+    }
+
+    #[test]
+    fn test_roll_pool_drop_lowest() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("{4d6, 3d8, 2d10}dl1")
+            .expression()
+            .unwrap()
+            .clone();
+        let result = roller.roll(&expr);
+        assert!(result.value() >= 2);
+        match &result {
+            RollResult::PoolResult { kept, dropped, .. } => {
+                assert_eq!(kept.len(), 2);
+                assert_eq!(dropped.len(), 1);
+            }
+            _ => panic!("Expected PoolResult"),
+        }
+    }
+
+    #[test]
+    fn test_roll_pool_count_success() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("{4d6, 3d8}cs>10")
+            .expression()
+            .unwrap()
+            .clone();
+        let result = roller.roll(&expr);
+        // Count of groups where sum > 10
+        assert!(result.value() >= 0 && result.value() <= 2);
+        match &result {
+            RollResult::PoolResult { .. } => {}
+            _ => panic!("Expected PoolResult"),
+        }
+    }
+
+    #[test]
+    fn test_roll_pool_with_literal() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("{1d20, 10}kh").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        // max(d20, 10): range [10, 20]
+        assert!(result.value() >= 10 && result.value() <= 20);
+    }
+
+    #[test]
+    fn test_roll_pool_dice_values() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("{4d6, 3d8}kh").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        let values = result.dice_values();
+        // Should collect dice from the kept group only
+        assert!(!values.is_empty());
+    }
+
+    #[test]
+    fn test_roll_pool_verbose_entries() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("{4d6, 3d8, 2d10}kh")
+            .expression()
+            .unwrap()
+            .clone();
+        let result = roller.roll(&expr);
+        let entries = result.to_verbose_entries();
+        // Should have 3 pool group entries
+        assert_eq!(entries.len(), 3);
+        let kept_count = entries.iter().filter(|e| e.kept).count();
+        assert_eq!(kept_count, 1); // only 1 kept (kh)
+    }
+
+    #[test]
+    fn test_roll_pool_deterministic() {
+        let expr = Parser::parse("{4d6, 3d8}kh").expression().unwrap().clone();
+        let r1 = {
+            let mut roller = Roller::new(LehmerRng::new(42));
+            roller.roll(&expr).value()
+        };
+        let r2 = {
+            let mut roller = Roller::new(LehmerRng::new(42));
+            roller.roll(&expr).value()
+        };
+        assert_eq!(r1, r2);
     }
 }

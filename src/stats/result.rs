@@ -270,4 +270,115 @@ mod tests {
         assert_eq!(stats.mean, 3.0);
         assert_eq!(stats.stddev, 0.0);
     }
+
+    // ── Coverage Gap Tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_add_quantity() {
+        let mut result = ProbabilitiesResult::new();
+        assert!(result.add_quantity(5, 100));
+        assert!(result.add_quantity(5, 200));
+        assert_eq!(result.total, 300);
+        assert_eq!(result.probability(5), 1.0);
+    }
+
+    #[test]
+    fn test_add_quantity_overflow() {
+        let mut result = ProbabilitiesResult::new();
+        result.add_quantity(1, u64::MAX - 10);
+        // Adding more should return false on overflow
+        assert!(!result.add_quantity(1, 20));
+    }
+
+    #[test]
+    fn test_merge() {
+        let mut dist1 = ProbabilitiesResult::new();
+        dist1.add(1);
+        dist1.add(2);
+
+        let mut dist2 = ProbabilitiesResult::new();
+        dist2.add(2);
+        dist2.add(3);
+
+        assert!(dist1.merge(&dist2));
+        assert_eq!(dist1.total, 4);
+        assert_eq!(dist1.probability(1), 0.25);
+        assert_eq!(dist1.probability(2), 0.5);
+        assert_eq!(dist1.probability(3), 0.25);
+    }
+
+    #[test]
+    fn test_merge_overflow() {
+        let mut dist1 = ProbabilitiesResult::new();
+        dist1.add_quantity(1, u64::MAX - 10);
+
+        let mut dist2 = ProbabilitiesResult::new();
+        dist2.add_quantity(1, 20);
+
+        assert!(!dist1.merge(&dist2));
+    }
+
+    #[test]
+    fn test_bucket() {
+        let mut result = ProbabilitiesResult::new();
+        for i in 1..=10 {
+            result.add(i);
+        }
+
+        let bucketed = result.bucket(3);
+        // Values 1-3 → bucket 1, 4-6 → bucket 2, 7-9 → bucket 3, 10 → bucket 4
+        assert_eq!(bucketed.total, 10);
+        assert!((bucketed.probability(1) - 3.0 / 10.0).abs() < 1e-10);
+        assert!((bucketed.probability(2) - 3.0 / 10.0).abs() < 1e-10);
+        assert!((bucketed.probability(3) - 3.0 / 10.0).abs() < 1e-10);
+        assert!((bucketed.probability(4) - 1.0 / 10.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_empty_distribution() {
+        let result = ProbabilitiesResult::new();
+        assert_eq!(result.total, 0);
+        assert_eq!(result.probability(1), 0.0);
+        assert_eq!(result.cumulative_probability(1), 0.0);
+        assert_eq!(result.reverse_cumulative_probability(1), 0.0);
+
+        let stats = result.stats();
+        assert_eq!(stats.min, 0);
+        assert_eq!(stats.max, 0);
+        assert_eq!(stats.mean, 0.0);
+        assert_eq!(stats.stddev, 0.0);
+        assert!(stats.distribution.is_empty());
+    }
+
+    #[test]
+    fn test_stats_non_trivial() {
+        // Distribution: 1×1, 2×2, 3×3, 4×2, 5×1 = total 9
+        // Mean = (1+4+9+8+5)/9 = 27/9 = 3.0
+        // Variance = ((1-3)²×1 + (2-3)²×2 + (3-3)²×3 + (4-3)²×2 + (5-3)²×1) / 9
+        //          = (4 + 2 + 0 + 2 + 4) / 9 = 12/9 = 1.333...
+        // Stddev = sqrt(1.333...) ≈ 1.1547
+        let mut result = ProbabilitiesResult::new();
+        for _ in 0..1 {
+            result.add(1);
+        }
+        for _ in 0..2 {
+            result.add(2);
+        }
+        for _ in 0..3 {
+            result.add(3);
+        }
+        for _ in 0..2 {
+            result.add(4);
+        }
+        for _ in 0..1 {
+            result.add(5);
+        }
+
+        let stats = result.stats();
+        assert_eq!(stats.min, 1);
+        assert_eq!(stats.max, 5);
+        assert!((stats.mean - 3.0).abs() < 1e-10);
+        assert!((stats.variance - 12.0 / 9.0).abs() < 1e-10);
+        assert!((stats.stddev - (12.0f64 / 9.0).sqrt()).abs() < 1e-10);
+    }
 }
