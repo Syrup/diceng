@@ -1,6 +1,6 @@
 use std::ffi::{c_char, c_longlong, c_ulonglong, c_void, CStr, CString};
 
-use crate::{parse, roll, roll_seeded, compute_distribution, Expression};
+use crate::{compute_distribution, parse, roll, roll_seeded, Expression};
 
 /// Helper: convert a Rust serde_json::Value to a C string pointer.
 /// Returns null on serialization failure.
@@ -13,6 +13,9 @@ fn json_to_ptr(value: &serde_json::Value) -> *mut c_char {
 
 /// Helper: convert a C string pointer to a Rust &str.
 /// Returns None if the pointer is null or the string is not valid UTF-8.
+///
+/// # Safety
+/// `ptr` must be a valid, null-terminated C string pointer.
 unsafe fn ptr_to_str<'a>(ptr: *const c_char) -> Option<&'a str> {
     if ptr.is_null() {
         return None;
@@ -27,8 +30,11 @@ unsafe fn ptr_to_str<'a>(ptr: *const c_char) -> Option<&'a str> {
 /// - On failure: `{"success": false, "errors": [{"message": "...", "position": N, "suggestion": "..."}]}`
 ///
 /// The returned pointer must be freed with `diceng_free`.
+///
+/// # Safety
+/// `input` must be a valid, null-terminated C string pointer.
 #[no_mangle]
-pub extern "C" fn diceng_parse(input: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn diceng_parse(input: *const c_char) -> *mut c_char {
     let Some(input_str) = (unsafe { ptr_to_str(input) }) else {
         let err = serde_json::json!({
             "success": false,
@@ -72,12 +78,15 @@ pub extern "C" fn diceng_parse(input: *const c_char) -> *mut c_char {
 /// `seed` is the deterministic seed. Pass -1 for random rolls.
 ///
 /// Returns a JSON object:
-/// - `{"value": N}` on success
+/// - `{"value": N, "dice": [...]}` on success
 /// - `{"error": "..."}` on failure
 ///
 /// The returned pointer must be freed with `diceng_free`.
+///
+/// # Safety
+/// `expr_json` must be a valid, null-terminated C string pointer.
 #[no_mangle]
-pub extern "C" fn diceng_roll(expr_json: *const c_char, seed: c_longlong) -> *mut c_char {
+pub unsafe extern "C" fn diceng_roll(expr_json: *const c_char, seed: c_longlong) -> *mut c_char {
     let Some(json_str) = (unsafe { ptr_to_str(expr_json) }) else {
         let err = serde_json::json!({"error": "null or invalid UTF-8 input"});
         return json_to_ptr(&err);
@@ -128,8 +137,11 @@ pub extern "C" fn diceng_roll(expr_json: *const c_char, seed: c_longlong) -> *mu
 /// - `{"error": "..."}` on failure
 ///
 /// The returned pointer must be freed with `diceng_free`.
+///
+/// # Safety
+/// `input` must be a valid, null-terminated C string pointer.
 #[no_mangle]
-pub extern "C" fn diceng_roll_dice(input: *const c_char, seed: c_longlong) -> *mut c_char {
+pub unsafe extern "C" fn diceng_roll_dice(input: *const c_char, seed: c_longlong) -> *mut c_char {
     let Some(input_str) = (unsafe { ptr_to_str(input) }) else {
         let err = serde_json::json!({"error": "null or invalid UTF-8 input"});
         return json_to_ptr(&err);
@@ -180,8 +192,11 @@ pub extern "C" fn diceng_roll_dice(input: *const c_char, seed: c_longlong) -> *m
 /// - `{"error": "..."}` on failure
 ///
 /// The returned pointer must be freed with `diceng_free`.
+///
+/// # Safety
+/// `expr_json` must be a valid, null-terminated C string pointer.
 #[no_mangle]
-pub extern "C" fn diceng_compute_distribution(
+pub unsafe extern "C" fn diceng_compute_distribution(
     expr_json: *const c_char,
     trials: c_ulonglong,
 ) -> *mut c_char {
