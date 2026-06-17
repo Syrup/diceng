@@ -2,7 +2,7 @@
 
 ![Rust](https://img.shields.io/badge/Rust-2021-orange?logo=rust)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Version](https://img.shields.io/badge/version-1.0.0-green)
+![Version](https://img.shields.io/badge/version-1.0.1-green)
 ![CI](https://github.com/Syrup/diceng/actions/workflows/ci.yml/badge.svg)
 ![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows%20%7C%20android-lightgrey)
 ![GitHub Stars](https://img.shields.io/github/stars/Syrup/diceng?style=social)
