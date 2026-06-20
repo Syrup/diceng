@@ -3,6 +3,7 @@ use terminal_size::{terminal_size, Width};
 
 /// Kind of die entry for verbose display
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum DieEntryKind {
     /// Explode: `!` - extra roll added to sum
     Explode,
