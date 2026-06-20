@@ -133,7 +133,22 @@ impl RollResult {
                     r.collect_dice_values(values);
                 }
             }
-            _ => {}
+            RollResult::BinaryOp { left, right, .. } => {
+                left.collect_dice_values(values);
+                right.collect_dice_values(values);
+            }
+            RollResult::UnaryMinus { inner, .. } => {
+                inner.collect_dice_values(values);
+            }
+            RollResult::DiceSet { results, .. } => {
+                for r in results {
+                    r.collect_dice_values(values);
+                }
+            }
+            RollResult::Counted { pool, .. } => {
+                pool.collect_dice_values(values);
+            }
+            RollResult::Literal { .. } => {}
         }
     }
 
@@ -240,8 +255,29 @@ impl RollResult {
             RollResult::BinaryOp {
                 op, left, right, ..
             } => {
-                // Recursively extract dice entries from both operands
-                let mut entries = left.to_verbose_entries();
+                let mut entries = Vec::new();
+
+                // Wrap left sub-expression in parens if it's a BinaryOp
+                let left_entries = left.to_verbose_entries();
+                if matches!(**left, RollResult::BinaryOp { .. }) {
+                    entries.push(DieEntry {
+                        value: 0,
+                        kept: false,
+                        chain: None,
+                        operator: None,
+                        kind: Some(DieEntryKind::GroupOpen),
+                    });
+                    entries.extend(left_entries);
+                    entries.push(DieEntry {
+                        value: 0,
+                        kept: false,
+                        chain: None,
+                        operator: None,
+                        kind: Some(DieEntryKind::GroupClose),
+                    });
+                } else {
+                    entries.extend(left_entries);
+                }
 
                 // Add separator
                 let op_str = match op {
@@ -252,14 +288,34 @@ impl RollResult {
                 };
                 entries.push(DieEntry {
                     value: 0,
-                    kept: false, // not a die, exclude from Kept/Drop summary
+                    kept: false,
                     chain: None,
                     operator: Some(op_str.to_string()),
                     kind: Some(DieEntryKind::Separator),
                 });
 
-                // Add right entries without operator prefix
-                entries.extend(right.to_verbose_entries());
+                // Wrap right sub-expression in parens if it's a BinaryOp
+                let right_entries = right.to_verbose_entries();
+                if matches!(**right, RollResult::BinaryOp { .. }) {
+                    entries.push(DieEntry {
+                        value: 0,
+                        kept: false,
+                        chain: None,
+                        operator: None,
+                        kind: Some(DieEntryKind::GroupOpen),
+                    });
+                    entries.extend(right_entries);
+                    entries.push(DieEntry {
+                        value: 0,
+                        kept: false,
+                        chain: None,
+                        operator: None,
+                        kind: Some(DieEntryKind::GroupClose),
+                    });
+                } else {
+                    entries.extend(right_entries);
+                }
+
                 entries
             }
             RollResult::UnaryMinus { inner, .. } => inner.to_verbose_entries(),
@@ -292,17 +348,39 @@ impl RollResult {
                     })
                     .collect();
 
-                group_results
-                    .iter()
-                    .enumerate()
-                    .map(|(i, r)| DieEntry {
-                        value: r.value(),
-                        kept: kept_set.contains(&i),
-                        chain: None,
-                        operator: None,
-                        kind: Some(DieEntryKind::PoolGroup),
-                    })
-                    .collect()
+                let mut entries = Vec::new();
+                entries.push(DieEntry {
+                    value: 0,
+                    kept: false,
+                    chain: None,
+                    operator: None,
+                    kind: Some(DieEntryKind::PoolOpen),
+                });
+                for (i, group) in group_results.iter().enumerate() {
+                    if i > 0 {
+                        entries.push(DieEntry {
+                            value: 0,
+                            kept: false,
+                            chain: None,
+                            operator: None,
+                            kind: Some(DieEntryKind::Pipe),
+                        });
+                    }
+                    let is_kept = kept_set.contains(&i);
+                    let group_entries = group.to_verbose_entries();
+                    for mut entry in group_entries {
+                        entry.kept = is_kept;
+                        entries.push(entry);
+                    }
+                }
+                entries.push(DieEntry {
+                    value: 0,
+                    kept: false,
+                    chain: None,
+                    operator: None,
+                    kind: Some(DieEntryKind::PoolClose),
+                });
+                entries
             }
         }
     }
@@ -1679,10 +1757,31 @@ mod tests {
             .clone();
         let result = roller.roll(&expr);
         let entries = result.to_verbose_entries();
-        // Should have 3 pool group entries
-        assert_eq!(entries.len(), 3);
-        let kept_count = entries.iter().filter(|e| e.kept).count();
-        assert_eq!(kept_count, 1); // only 1 kept (kh)
+        // PoolOpen + 4d6 dice + Pipe + 3d8 dice + Pipe + 2d10 dice + PoolClose
+        assert_eq!(entries.len(), 1 + 4 + 1 + 3 + 1 + 2 + 1); // 13
+                                                              // First entry is PoolOpen, last is PoolClose
+        assert_eq!(entries[0].kind, Some(DieEntryKind::PoolOpen));
+        assert_eq!(
+            entries[entries.len() - 1].kind,
+            Some(DieEntryKind::PoolClose)
+        );
+        // Pipes between groups
+        let pipe_count = entries
+            .iter()
+            .filter(|e| e.kind == Some(DieEntryKind::Pipe))
+            .count();
+        assert_eq!(pipe_count, 2); // 3 groups = 2 pipes
+                                   // Only one group kept (kh)
+        let kept_dice = entries
+            .iter()
+            .filter(|e| e.kept && e.kind.is_none())
+            .count();
+        let dropped_dice = entries
+            .iter()
+            .filter(|e| !e.kept && e.kind.is_none())
+            .count();
+        assert!(kept_dice > 0);
+        assert!(dropped_dice > 0);
     }
 
     #[test]
@@ -1697,5 +1796,35 @@ mod tests {
             roller.roll(&expr).value()
         };
         assert_eq!(r1, r2);
+    }
+
+    #[test]
+    fn test_roll_dice_values_binary_op() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("2d6 + 3").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        let values = result.dice_values();
+        assert_eq!(values.len(), 2);
+        for v in &values {
+            assert!(*v >= 1 && *v <= 6);
+        }
+    }
+
+    #[test]
+    fn test_roll_dice_values_dice_set() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("2d6 + 2d4").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        let values = result.dice_values();
+        assert_eq!(values.len(), 4);
+    }
+
+    #[test]
+    fn test_roll_dice_values_literal() {
+        let mut roller = Roller::new(LehmerRng::new(42));
+        let expr = Parser::parse("42").expression().unwrap().clone();
+        let result = roller.roll(&expr);
+        let values = result.dice_values();
+        assert!(values.is_empty());
     }
 }
