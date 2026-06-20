@@ -2,6 +2,10 @@
 # Only release when a Release PR is merged, not on every push to main
 release_always = false
 
+# Only create Release PR when there's a feat/fix/perf commit
+# chore, ci, docs, etc. won't trigger a release
+release_commits = "^(feat|fix|perf)[(:]"
+
 # Run cargo-semver-checks to detect API breaking changes
 semver_check = true
 
